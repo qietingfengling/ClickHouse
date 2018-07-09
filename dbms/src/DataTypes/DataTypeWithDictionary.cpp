@@ -34,13 +34,9 @@ namespace
     }
 }
 
-DataTypeWithDictionary::DataTypeWithDictionary(DataTypePtr dictionary_type_, DataTypePtr indexes_type_)
-        : dictionary_type(std::move(dictionary_type_)), indexes_type(std::move(indexes_type_))
+DataTypeWithDictionary::DataTypeWithDictionary(DataTypePtr dictionary_type_)
+        : dictionary_type(std::move(dictionary_type_))
 {
-    if (!indexes_type->isUnsignedInteger())
-        throw Exception("Index type of DataTypeWithDictionary must be unsigned integer, but got "
-                        + indexes_type->getName(), ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
-
     auto inner_type = dictionary_type;
     if (dictionary_type->isNullable())
         inner_type = static_cast<const DataTypeNullable &>(*dictionary_type).getNestedType();
@@ -147,20 +143,20 @@ struct IndexesSerializationType
         type = static_cast<Type>(resetFlags(val));
     }
 
-    IndexesSerializationType(const IDataType & data_type, bool has_additional_keys, bool need_global_dictionary)
+    IndexesSerializationType(const IColumn & column, bool has_additional_keys, bool need_global_dictionary)
         : has_additional_keys(has_additional_keys), need_global_dictionary(need_global_dictionary)
     {
-        if (typeid_cast<const DataTypeUInt8 *>(&data_type))
+        if (typeid_cast<const ColumnUInt8 *>(&column))
             type = TUInt8;
-        else if (typeid_cast<const DataTypeUInt16 *>(&data_type))
+        else if (typeid_cast<const ColumnUInt16 *>(&column))
             type = TUInt16;
-        else if (typeid_cast<const DataTypeUInt32 *>(&data_type))
+        else if (typeid_cast<const ColumnUInt32 *>(&column))
             type = TUInt32;
-        else if (typeid_cast<const DataTypeUInt64 *>(&data_type))
+        else if (typeid_cast<const ColumnUInt64 *>(&column))
             type = TUInt64;
         else
-            throw Exception("Invalid DataType for IndexesSerializationType. Expected UInt*, got " + data_type.getName(),
-                            ErrorCodes::LOGICAL_ERROR);
+            throw Exception("Invalid Indexes column for IndexesSerializationType. Expected ColumnUInt*, got "
+                            + column.getName(), ErrorCodes::LOGICAL_ERROR);
     }
 
     DataTypePtr getDataType() const
@@ -252,7 +248,7 @@ void DataTypeWithDictionary::serializeBinaryBulkStatePrefix(
 
     writeIntBinary(key_version, *stream);
 
-    auto column_unique = createColumnUnique(*dictionary_type, *indexes_type);
+    auto column_unique = createColumnUnique(*dictionary_type);
     state = std::make_shared<SerializeStateWithDictionary>(key_version, std::move(column_unique));
 }
 
@@ -447,7 +443,7 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
     bool need_dictionary = settings.max_dictionary_size != 0;
     bool need_write_dictionary = !was_global_dictionary_written && unique_state.limit >= settings.max_dictionary_size;
 
-    IndexesSerializationType index_version(*indexes_type, need_additional_keys, need_dictionary);
+    IndexesSerializationType index_version(*sub_index, need_additional_keys, need_dictionary);
     index_version.serialize(*indexes_stream);
 
     unique_state = global_dictionary->getSerializableState();
@@ -469,7 +465,7 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
 
     UInt64 num_rows = sub_index->size();
     writeIntBinary(num_rows, *indexes_stream);
-    indexes_type->serializeBinaryBulk(*sub_index, *indexes_stream, 0, num_rows);
+    index_version.getDataType()->serializeBinaryBulk(*sub_index, *indexes_stream, 0, num_rows);
 }
 
 void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
@@ -521,57 +517,59 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         keys_type->deserializeBinaryBulk(*state_with_dictionary->additional_keys, *indexes_stream, num_keys, 0);
     };
 
-    auto readIndexes = [this, state_with_dictionary, indexes_stream, &column_with_dictionary](UInt64 num_rows,
-                                                                                              bool need_dictionary)
+    auto readIndexes = [this, state_with_dictionary, indexes_stream, &column_with_dictionary](UInt64 num_rows)
     {
+        auto indexes_type = state_with_dictionary->index_type.getDataType();
         MutableColumnPtr indexes_column = indexes_type->createColumn();
         indexes_type->deserializeBinaryBulk(*indexes_column, *indexes_stream, num_rows, 0);
 
         auto & global_dictionary = state_with_dictionary->global_dictionary;
         const auto & additional_keys = state_with_dictionary->additional_keys;
-        auto * column_unique = column_with_dictionary.getUnique();
+        auto & column_unique = column_with_dictionary.getUnique();
 
         bool has_additional_keys = state_with_dictionary->additional_keys != nullptr;
         bool column_is_empty = column_with_dictionary.empty();
-        bool column_with_global_dictionary = column_unique == global_dictionary.get();
+        bool column_with_global_dictionary = &column_unique == global_dictionary.get();
 
         if (!has_additional_keys && (column_is_empty || column_with_global_dictionary))
         {
             if (column_is_empty)
                 column_with_dictionary.setUnique(global_dictionary);
 
-            column_with_dictionary.getIndexes()->insertRangeFrom(*indexes_column, 0, num_rows);
+            auto local_column = ColumnWithDictionary::create(global_dictionary, std::move(indexes_column));
+
+            column_with_dictionary.insertRangeFrom(*local_column, 0, num_rows);
         }
-        else if (!need_dictionary)
+        else if (!state_with_dictionary->index_type.need_global_dictionary)
         {
-            auto indexes = column_unique->uniqueInsertRangeFrom(*additional_keys, 0, additional_keys->size());
-            column_with_dictionary.getIndexes()->insertRangeFrom(*indexes->index(*indexes_column, 0), 0, num_rows);
+            auto local_column = ColumnWithDictionary::create(global_dictionary, std::move(indexes_column));
+            column_with_dictionary.insertRangeFrom(*local_column, 0, num_rows);
         }
         else
         {
             if (column_with_global_dictionary)
             {
-                auto unique_indexes = mapUniqueIndex(*column_with_dictionary.getIndexes());
-                auto sub_keys = column_with_dictionary.getUnique()->getNestedColumn()->index(*unique_indexes, 0);
-                auto new_unique = createColumnUnique(*dictionary_type, *indexes_type);
+                auto unique_indexes = mapUniqueIndex(column_with_dictionary.getIndexes());
+                auto sub_keys = column_with_dictionary.getUnique().getNestedColumn()->index(*unique_indexes, 0);
+                auto new_unique = createColumnUnique(*dictionary_type);
                 auto new_idx = new_unique->uniqueInsertRangeFrom(*sub_keys, 0, sub_keys->size());
                 column_with_dictionary.setUnique(std::move(new_unique));
-                column_with_dictionary.setIndexes((*(new_idx->index(*column_with_dictionary.getIndexes(), 0))).mutate());
+                column_with_dictionary.setIndexes((*(new_idx->index(column_with_dictionary.getIndexes(), 0))).mutate());
                 column_unique = column_with_dictionary.getUnique();
             }
 
             auto index_map = mapIndexWithOverflow(*indexes_column, global_dictionary->size());
             auto used_keys = global_dictionary->getNestedColumn()->index(*index_map, 0);
-            auto indexes = column_unique->uniqueInsertRangeFrom(*used_keys, 0, used_keys->size());
+            auto indexes = column_unique.uniqueInsertRangeFrom(*used_keys, 0, used_keys->size());
 
             if (additional_keys)
             {
                 size_t num_keys = additional_keys->size();
-                auto additional_indexes = column_unique->uniqueInsertRangeFrom(*additional_keys, 0, num_keys);
+                auto additional_indexes = column_unique.uniqueInsertRangeFrom(*additional_keys, 0, num_keys);
                 indexes->insertRangeFrom(*additional_indexes, 0, num_keys);
             }
 
-            column_with_dictionary.getIndexes()->insertRangeFrom(*indexes->index(*indexes_column, 0), 0, num_rows);
+            column_with_dictionary.getIndexes().insertRangeFrom(*indexes->index(*indexes_column, 0), 0, num_rows);
         }
     };
 
@@ -596,7 +594,7 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         }
 
         size_t num_rows_to_read = std::min(limit, state_with_dictionary->num_pending_rows);
-        readIndexes(num_rows_to_read, state_with_dictionary->index_type.need_global_dictionary);
+        readIndexes(num_rows_to_read);
         limit -= num_rows_to_read;
         state_with_dictionary->num_pending_rows -= num_rows_to_read;
     }
@@ -634,38 +632,20 @@ void DataTypeWithDictionary::deserializeImpl(
     column_with_dictionary.insertFromFullColumn(*temp_column, 0);
 }
 
-template <typename ColumnType, typename IndexType>
+template <typename ColumnType>
 MutableColumnUniquePtr DataTypeWithDictionary::createColumnUniqueImpl(const IDataType & keys_type)
 {
-    return ColumnUnique<ColumnType, IndexType>::create(keys_type);
-}
-
-template <typename ColumnType>
-MutableColumnUniquePtr DataTypeWithDictionary::createColumnUniqueImpl(const IDataType & keys_type,
-                                                                      const IDataType & indexes_type)
-{
-    if (typeid_cast<const DataTypeUInt8 *>(&indexes_type))
-        return createColumnUniqueImpl<ColumnType, UInt8>(keys_type);
-    if (typeid_cast<const DataTypeUInt16 *>(&indexes_type))
-        return createColumnUniqueImpl<ColumnType, UInt16>(keys_type);
-    if (typeid_cast<const DataTypeUInt32 *>(&indexes_type))
-        return createColumnUniqueImpl<ColumnType, UInt32>(keys_type);
-    if (typeid_cast<const DataTypeUInt64 *>(&indexes_type))
-        return createColumnUniqueImpl<ColumnType, UInt64>(keys_type);
-
-    throw Exception("The type of indexes must be unsigned integer, but got " + indexes_type.getName(),
-                    ErrorCodes::LOGICAL_ERROR);
+    return ColumnUnique<ColumnType>::create(keys_type);
 }
 
 struct CreateColumnVector
 {
     MutableColumnUniquePtr & column;
     const IDataType & keys_type;
-    const IDataType & indexes_type;
     const IDataType * nested_type;
 
-    CreateColumnVector(MutableColumnUniquePtr & column, const IDataType & keys_type, const IDataType & indexes_type)
-            : column(column), keys_type(keys_type), indexes_type(indexes_type), nested_type(&keys_type)
+    CreateColumnVector(MutableColumnUniquePtr & column, const IDataType & keys_type)
+            : column(column), keys_type(keys_type), nested_type(&keys_type)
     {
         if (auto nullable_type = typeid_cast<const DataTypeNullable *>(&keys_type))
             nested_type = nullable_type->getNestedType().get();
@@ -675,29 +655,28 @@ struct CreateColumnVector
     void operator()()
     {
         if (typeid_cast<const DataTypeNumber<T> *>(nested_type))
-            column = DataTypeWithDictionary::createColumnUniqueImpl<ColumnVector<T>>(keys_type, indexes_type);
+            column = DataTypeWithDictionary::createColumnUniqueImpl<ColumnVector<T>>(keys_type);
     }
 };
 
-MutableColumnUniquePtr DataTypeWithDictionary::createColumnUnique(const IDataType & keys_type,
-                                                                  const IDataType & indexes_type)
+MutableColumnUniquePtr DataTypeWithDictionary::createColumnUnique(const IDataType & keys_type)
 {
     auto * type = &keys_type;
     if (type->isNullable())
         type = static_cast<const DataTypeNullable &>(keys_type).getNestedType().get();
 
     if (type->isString())
-        return createColumnUniqueImpl<ColumnString>(keys_type, indexes_type);
+        return createColumnUniqueImpl<ColumnString>(keys_type);
     if (type->isFixedString())
-        return createColumnUniqueImpl<ColumnFixedString>(keys_type, indexes_type);
+        return createColumnUniqueImpl<ColumnFixedString>(keys_type);
     if (typeid_cast<const DataTypeDate *>(type))
-        return createColumnUniqueImpl<ColumnVector<UInt16>>(keys_type, indexes_type);
+        return createColumnUniqueImpl<ColumnVector<UInt16>>(keys_type);
     if (typeid_cast<const DataTypeDateTime *>(type))
-        return createColumnUniqueImpl<ColumnVector<UInt32>>(keys_type, indexes_type);
+        return createColumnUniqueImpl<ColumnVector<UInt32>>(keys_type);
     if (type->isNumber())
     {
         MutableColumnUniquePtr column;
-        TypeListNumbers::forEach(CreateColumnVector(column, keys_type, indexes_type));
+        TypeListNumbers::forEach(CreateColumnVector(column, keys_type));
 
         if (!column)
             throw Exception("Unexpected numeric type: " + type->getName(), ErrorCodes::LOGICAL_ERROR);
@@ -711,8 +690,8 @@ MutableColumnUniquePtr DataTypeWithDictionary::createColumnUnique(const IDataTyp
 
 MutableColumnPtr DataTypeWithDictionary::createColumn() const
 {
-    MutableColumnPtr indexes = indexes_type->createColumn();
-    MutableColumnPtr dictionary = createColumnUnique(*dictionary_type, *indexes_type);
+    MutableColumnPtr indexes = DataTypeUInt8().createColumn();
+    MutableColumnPtr dictionary = createColumnUnique(*dictionary_type);
     return ColumnWithDictionary::create(std::move(dictionary), std::move(indexes));
 }
 
@@ -722,20 +701,17 @@ bool DataTypeWithDictionary::equals(const IDataType & rhs) const
         return false;
 
     auto & rhs_with_dictionary = static_cast<const DataTypeWithDictionary &>(rhs);
-    return dictionary_type->equals(*rhs_with_dictionary.dictionary_type)
-           && indexes_type->equals(*rhs_with_dictionary.indexes_type);
+    return dictionary_type->equals(*rhs_with_dictionary.dictionary_type);
 }
-
 
 
 static DataTypePtr create(const ASTPtr & arguments)
 {
-    if (!arguments || arguments->children.size() != 2)
-        throw Exception("WithDictionary data type family must have two arguments - type of elements and type of indices"
-                        , ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+    if (!arguments || arguments->children.size() != 1)
+        throw Exception("WithDictionary data type family must have single argument - type of elements",
+                        ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
 
-    return std::make_shared<DataTypeWithDictionary>(DataTypeFactory::instance().get(arguments->children[0]),
-                                                    DataTypeFactory::instance().get(arguments->children[1]));
+    return std::make_shared<DataTypeWithDictionary>(DataTypeFactory::instance().get(arguments->children[0]));
 }
 
 void registerDataTypeWithDictionary(DataTypeFactory & factory)
