@@ -254,7 +254,7 @@ static Block removeColumnsWithDictionary(Block & block, const ColumnNumbers & ar
             else
             {
                 has_with_dictionary = true;
-                column_with_dict_size = column_with_dict->getUnique()->size();
+                column_with_dict_size = column_with_dict->getDictionary().size();
                 indexes = column_with_dict->getIndexesPtr();
             }
         }
@@ -291,7 +291,7 @@ static Block removeColumnsWithDictionary(Block & block, const ColumnNumbers & ar
                                 + column.type->getName(), ErrorCodes::LOGICAL_ERROR);
 
             ColumnPtr new_column = convert_all_to_full ? column_with_dict->convertToFullColumn()
-                                                       : column_with_dict->getUnique()->getNestedColumn();
+                                                       : column_with_dict->getDictionary().getNestedColumn();
 
             temp_block.insert({new_column, type_with_dict->getDictionaryType(), column.name});
         }
@@ -479,8 +479,7 @@ DataTypePtr FunctionBuilderImpl::getReturnType(const ColumnsWithTypeAndName & ar
         ArgumentsWithoutDictionary arguments_without_dictionary(arguments);
         if (!arguments_without_dictionary.all_without_dictionary)
             return std::make_shared<DataTypeWithDictionary>(
-                    getReturnTypeWithoutDictionary(arguments_without_dictionary.arguments),
-                    arguments_without_dictionary.common_index_type);
+                    getReturnTypeWithoutDictionary(arguments_without_dictionary.arguments));
     }
 
     return getReturnTypeWithoutDictionary(arguments);
