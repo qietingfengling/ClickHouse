@@ -62,7 +62,7 @@ public:
     }
 
     void insert(const Field & x) override;
-    void insertDefault() override { idx.insertPosition(getDictionary().getDefaultValueIndex()); }
+    void insertDefault() override;
 
     void insertFrom(const IColumn & src, size_t n) override;
     void insertFromFullColumn(const IColumn & src, size_t n);

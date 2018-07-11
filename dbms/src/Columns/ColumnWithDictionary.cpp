@@ -1,5 +1,5 @@
 #include <Columns/ColumnWithDictionary.h>
-#include <Columns/ColumnsNumber.h
+#include <Columns/ColumnsNumber.h>
 #include <DataStreams/ColumnGathererStream.h>
 #include <DataTypes/NumberTraits.h>
 #include <Common/HashTable/HashMap.h>
@@ -335,7 +335,7 @@ size_t ColumnWithDictionary::Index::getSizeOfIndexType(const IColumn & column, s
 }
 
 template <typename IndexType>
-ColumnVector<IndexType>::Container & ColumnWithDictionary::Index::getPositionsData()
+typename ColumnVector<IndexType>::Container & ColumnWithDictionary::Index::getPositionsData()
 {
     auto * positions_ptr = typeid_cast<ColumnVector<IndexType> *>(positions->assumeMutable().get());
     if (!positions_ptr)
@@ -351,7 +351,7 @@ void ColumnWithDictionary::Index::convertPositions()
 {
     auto convert = [&](auto x)
     {
-        using CurIndexType = typeof(x);
+        using CurIndexType = decltype(x);
         auto & data = getPositionsData<CurIndexType>();
 
         if (sizeof(CurIndexType) != sizeof(IndexType))
@@ -377,7 +377,7 @@ void ColumnWithDictionary::Index::expandType()
     auto expand = [&](auto type)
     {
         using CurIndexType = decltype(type);
-        auto next_size = NumberTraits::nextSize(sizeof(CurIndexType));
+        constexpr auto next_size = NumberTraits::nextSize(sizeof(CurIndexType));
         if (next_size == sizeof(CurIndexType))
             throw Exception("Can't expand indexes type for ColumnWithDictionary from type: "
                             + demangle(typeid(CurIndexType).name()), ErrorCodes::LOGICAL_ERROR);
@@ -418,7 +418,7 @@ void ColumnWithDictionary::Index::insertPositionsRange(const IColumn & column, s
             convertPositions<ColumnType>();
 
         if (size_of_type == sizeof(ColumnType))
-            positions->insertRangeFrom(column, offset, limit);
+            positions->assumeMutableRef().insertRangeFrom(column, offset, limit);
         else
         {
             auto copy = [&](auto cur_type)
