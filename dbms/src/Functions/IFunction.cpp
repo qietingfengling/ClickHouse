@@ -355,7 +355,6 @@ void FunctionBuilderImpl::checkNumberOfArguments(size_t number_of_arguments) con
 struct ArgumentsWithoutDictionary
 {
     ColumnsWithTypeAndName arguments;
-    DataTypePtr common_index_type;
     bool all_without_dictionary = true;
 
     explicit ArgumentsWithoutDictionary(const ColumnsWithTypeAndName & args)
@@ -372,12 +371,8 @@ struct ArgumentsWithoutDictionary
                     arguments = args;
                 }
                 arguments[i].type = arg_with_dict->getDictionaryType();
-                index_types.push_back(arg_with_dict->getIndexesType());
             }
         }
-
-        if (!all_without_dictionary)
-            common_index_type = getLeastSupertype(index_types);
     }
 };
 
