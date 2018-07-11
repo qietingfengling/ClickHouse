@@ -75,7 +75,7 @@ public:
     void insertDataWithTerminatingZero(const char * pos, size_t length) override;
 
 
-    void popBack(size_t n) override { idx.getPositions()->popBack(n); }
+    void popBack(size_t n) override { idx.popBack(n); }
 
     StringRef serializeValueIntoArena(size_t n, Arena & arena, char const *& begin) const override;
 
@@ -117,7 +117,7 @@ public:
         return getDictionary().index(getIndexes(), 0)->getExtremes(min, max); /// TODO: optimize
     }
 
-    void reserve(size_t n) override { idx.getPositions()->reserve(n); }
+    void reserve(size_t n) override { idx.reserve(n); }
 
     size_t byteSize() const override { return idx.getPositions()->byteSize() + getDictionary().byteSize(); }
     size_t allocatedBytes() const override { return idx.getPositions()->allocatedBytes() + getDictionary().allocatedBytes(); }
@@ -172,6 +172,9 @@ private:
         void insertPosition(UInt64 position);
         void insertPositionsRange(const IColumn & column, size_t offset, size_t limit);
 
+        void popBack(size_t n) { positions->popBack(n); }
+        void reserve(size_t n) { positions->reserve(n); }
+
         UInt64 getMaxPositionForCurrentType() const;
 
         static size_t getSizeOfIndexType(const IColumn & column, size_t hint);
@@ -184,7 +187,7 @@ private:
         void expandType();
 
         template <typename IndexType>
-        ColumnVector<IndexType>::Container & getPositionsData();
+        typename ColumnVector<IndexType>::Container & getPositionsData();
 
         template <typename IndexType>
         void convertPositions();

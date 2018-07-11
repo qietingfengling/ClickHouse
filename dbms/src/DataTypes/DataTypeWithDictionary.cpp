@@ -260,8 +260,8 @@ void DataTypeWithDictionary::serializeBinaryBulkStateSuffix(
 
     if (state_with_dictionary->global_dictionary)
     {
-        auto unique_state = state_with_dictionary->global_dictionary->getSerializableState();
-        UInt64 num_keys = unique_state.limit;
+        auto nested_column = state_with_dictionary->global_dictionary->getNestedColumn();
+        UInt64 num_keys = nested_column->size();
         if (settings.max_dictionary_size)
         {
             settings.path.push_back(Substream::DictionaryKeys);
@@ -273,8 +273,7 @@ void DataTypeWithDictionary::serializeBinaryBulkStateSuffix(
                                 ErrorCodes::LOGICAL_ERROR);
 
             writeIntBinary(num_keys, *stream);
-            removeNullable(dictionary_type)->serializeBinaryBulk(*unique_state.column, *stream,
-                                                                 unique_state.offset, unique_state.limit);
+            removeNullable(dictionary_type)->serializeBinaryBulk(*nested_column, *stream, 0, num_keys);
         }
     }
 }
@@ -501,7 +500,7 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         else
         {
             auto index_map = mapIndexWithOverflow(*indexes_column, global_dictionary->size());
-            auto keys = column_unique.getNestedColumn()->index(*index_map, 0);
+            auto keys = (*std::move(column_unique.getNestedColumn()->index(*index_map, 0))).mutate();
 
             if (additional_keys)
                 keys->insertRangeFrom(*additional_keys, 0, additional_keys->size());
@@ -587,7 +586,7 @@ namespace
         void operator()()
         {
             if (typeid_cast<const DataTypeNumber<T> *>(&keys_type))
-                column = creator((DataTypeNumber<T> *)(nullptr));
+                column = creator((ColumnVector<T> *)(nullptr));
         }
     };
 }
