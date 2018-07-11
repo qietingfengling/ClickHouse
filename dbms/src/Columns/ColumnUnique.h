@@ -496,14 +496,15 @@ IColumnUnique::IndexesWithOverflow ColumnUnique<ColumnType>::uniqueInsertRangeWi
     size_t max_dictionary_size)
 {
 
-    size_t size = getRawColumnPtr()->size();
     auto overflowed_keys = column_holder->cloneEmpty();
     auto overflowed_keys_ptr = typeid_cast<ColumnType *>(overflowed_keys.get());
     if (!overflowed_keys_ptr)
         throw Exception("Invalid keys type for ColumnUnique.", ErrorCodes::LOGICAL_ERROR);
 
-    auto callForType = [&](auto x)
+    auto callForType = [this, &src, start, length, overflowed_keys_ptr, max_dictionary_size](auto x) -> MutableColumnPtr
     {
+        size_t size = getRawColumnPtr()->size();
+
         using IndexType = decltype(x);
         if (size <= std::numeric_limits<IndexType>::max())
         {
