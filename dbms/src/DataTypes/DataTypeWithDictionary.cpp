@@ -53,7 +53,7 @@ void DataTypeWithDictionary::enumerateStreams(const StreamCallback & callback, S
     path.push_back(Substream::DictionaryKeys);
     dictionary_type->enumerateStreams(callback, path);
     path.back() = Substream::DictionaryIndexes;
-    indexes_type->enumerateStreams(callback, path);
+    callback(path);
     path.pop_back();
 }
 
@@ -192,7 +192,6 @@ struct DeserializeStateWithDictionary : public IDataType::DeserializeBinaryBulkS
 {
     KeysSerializationVersion key_version;
     ColumnUniquePtr global_dictionary;
-    UInt64 num_bytes_in_dictionary;
 
     IndexesSerializationType index_type;
     MutableColumnPtr additional_keys;
@@ -553,8 +552,8 @@ void DataTypeWithDictionary::serializeImpl(
         DataTypeWithDictionary::SerealizeFunctionPtr<Args ...> func, Args & ... args) const
 {
     auto & column_with_dictionary = getColumnWithDictionary(column);
-    size_t unique_row_number = column_with_dictionary.getIndexes()->getUInt(row_num);
-    (dictionary_type.get()->*func)(*column_with_dictionary.getUnique()->getNestedColumn(), unique_row_number, ostr, std::forward<Args>(args)...);
+    size_t unique_row_number = column_with_dictionary.getIndexes().getUInt(row_num);
+    (dictionary_type.get()->*func)(*column_with_dictionary.getDictionary().getNestedColumn(), unique_row_number, ostr, std::forward<Args>(args)...);
 }
 
 template <typename ... Args>
@@ -563,7 +562,7 @@ void DataTypeWithDictionary::deserializeImpl(
         DataTypeWithDictionary::DeserealizeFunctionPtr<Args ...> func, Args & ... args) const
 {
     auto & column_with_dictionary = getColumnWithDictionary(column);
-    auto temp_column = column_with_dictionary.getUnique()->cloneEmpty();
+    auto temp_column = column_with_dictionary.getDictionary().cloneEmpty();
 
     (dictionary_type.get()->*func)(*temp_column, istr, std::forward<Args>(args)...);
 
