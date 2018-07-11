@@ -460,13 +460,13 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeFrom(const IColumn &
 {
     size_t size = getRawColumnPtr()->size();
 
-    auto callForType = [&](auto x)
+    auto callForType = [this, &](auto x)
     {
         using IndexType = decltype(x);
         if (size <= std::numeric_limits<IndexType>::max())
         {
             auto positions_column = ColumnVector<IndexType>::create(length);
-            return uniqueInsertRangeImpl<IndexType>(src, start, length, std::move(positions_column), nullptr, 0);
+            return this->uniqueInsertRangeImpl<IndexType>(src, start, length, std::move(positions_column), nullptr, 0);
         }
 
         return nullptr;
