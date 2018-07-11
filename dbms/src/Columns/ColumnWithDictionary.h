@@ -128,7 +128,7 @@ public:
 
         /// Column doesn't own dictionary if it's shared.
         if (!dictionary.isShared())
-            callback(dictionary.getColumnUnique());
+            callback(dictionary.getColumnUniquePtr());
     }
 
     bool valuesHaveFixedSize() const override { return getDictionary().valuesHaveFixedSize(); }
@@ -204,7 +204,7 @@ private:
         ColumnPtr & getColumnUniquePtr() { return column_unique; }
 
         const IColumnUnique & getColumnUnique() const { return static_cast<const IColumnUnique &>(*column_unique); }
-        IColumnUnique & getColumnUnique() { return static_cast<IColumnUnique &>(*column_unique); }
+        IColumnUnique & getColumnUnique() { return static_cast<IColumnUnique &>(column_unique->assumeMutableRef()); }
 
         /// Dictionary may be shared for several mutable columns.
         /// Immutable columns may have the same column unique, which isn't necessarily shared dictionary.
