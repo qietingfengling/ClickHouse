@@ -362,7 +362,8 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
 
     auto updatePosition = [&](UInt64 & next_position, UInt64 num_added_rows) -> MutableColumnPtr
     {
-        using SuperiorIndexType = NumberTraits::Construct<false, false, NumberTraits::nextSize(sizeof(IndexType))>::Type;
+        constexpr auto next_size = NumberTraits::nextSize(sizeof(IndexType));
+        using SuperiorIndexType = typename NumberTraits::Construct<false, false, next_size>::Type;
 
         ++next_position;
 
