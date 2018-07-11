@@ -373,7 +373,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                 throw Exception("Can't find superior index type for type " + demangle(typeid(IndexType).name()),
                                 ErrorCodes::LOGICAL_ERROR);
 
-            auto expanded_column = ColumnVector<IndexType>::create(length);
+            auto expanded_column = ColumnVector<SuperiorIndexType>::create(length);
             auto & expanded_data = expanded_column->getData();
             for (size_t i = 0; i < num_added_rows; ++i)
                 expanded_data[i] = positions[i];
