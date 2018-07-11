@@ -1910,7 +1910,7 @@ public:
             throw Exception("First first argument of function dictionaryIndexes must be ColumnWithDictionary, but got"
                             + arguments[0]->getName(), ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
 
-        return type->getIndexesType();
+        return std::make_shared<DataTypeUInt64>();
     }
 
     void executeImpl(Block & block, const ColumnNumbers & arguments, size_t result, size_t /*input_rows_count*/) override
@@ -1918,7 +1918,13 @@ public:
         auto arg_num = arguments[0];
         const auto & arg = block.getByPosition(arg_num);
         auto & res = block.getByPosition(result);
-        res.column = typeid_cast<const ColumnWithDictionary *>(arg.column.get())->getIndexesPtr();
+        auto indexes_col = typeid_cast<const ColumnWithDictionary *>(arg.column.get())->getIndexesPtr();
+        auto new_indexes_col = ColumnUInt64::create(indexes_col->size());
+        auto & data = new_indexes_col->getData();
+        for (size_t i = 0; i < data.size(); ++i)
+            data[i] = indexes_col->getUInt(i);
+
+        res.column = std::move(new_indexes_col);
     }
 };
 
@@ -1952,7 +1958,7 @@ public:
         const auto & arg = block.getByPosition(arg_num);
         auto & res = block.getByPosition(result);
         const auto * column_with_dictionary = typeid_cast<const ColumnWithDictionary *>(arg.column.get());
-        res.column = column_with_dictionary->getUnique()->getNestedColumn()->cloneResized(arg.column->size());
+        res.column = column_with_dictionary->getDictionary().getNestedColumn()->cloneResized(arg.column->size());
     }
 };
 
