@@ -66,6 +66,7 @@ void ColumnWithDictionary::insert(const Field & x)
 {
     compactIfSharedDictionary();
     idx.insertPosition(dictionary.getColumnUnique().uniqueInsert(x));
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insertDefault()
@@ -93,12 +94,15 @@ void ColumnWithDictionary::insertFrom(const IColumn & src, size_t n)
         const auto & nested = *src_with_dict->getDictionary().getNestedColumn();
         idx.insertPosition(dictionary.getColumnUnique().uniqueInsertFrom(nested, position));
     }
+
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insertFromFullColumn(const IColumn & src, size_t n)
 {
     compactIfSharedDictionary();
     idx.insertPosition(dictionary.getColumnUnique().uniqueInsertFrom(src, n));
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insertRangeFrom(const IColumn & src, size_t start, size_t length)
@@ -128,6 +132,7 @@ void ColumnWithDictionary::insertRangeFrom(const IColumn & src, size_t start, si
         auto idx_to_insert = dictionary.getColumnUnique().uniqueInsertRangeFrom(*used_keys, 0, used_keys->size());
         idx.insertPositionsRange(*idx_to_insert, 0, length);
     }
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insertRangeFromFullColumn(const IColumn & src, size_t start, size_t length)
@@ -135,6 +140,7 @@ void ColumnWithDictionary::insertRangeFromFullColumn(const IColumn & src, size_t
     compactIfSharedDictionary();
     auto inserted_indexes = dictionary.getColumnUnique().uniqueInsertRangeFrom(src, start, length);
     idx.insertPositionsRange(*inserted_indexes, 0, length);
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insertRangeFromDictionaryEncodedColumn(const IColumn & keys, const IColumn & positions)
@@ -142,18 +148,21 @@ void ColumnWithDictionary::insertRangeFromDictionaryEncodedColumn(const IColumn 
     compactIfSharedDictionary();
     auto inserted_indexes = dictionary.getColumnUnique().uniqueInsertRangeFrom(keys, 0, keys.size());
     idx.insertPositionsRange(*inserted_indexes->index(positions, 0), 0, positions.size());
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insertData(const char * pos, size_t length)
 {
     compactIfSharedDictionary();
     idx.insertPosition(dictionary.getColumnUnique().uniqueInsertData(pos, length));
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insertDataWithTerminatingZero(const char * pos, size_t length)
 {
     compactIfSharedDictionary();
     idx.insertPosition(dictionary.getColumnUnique().uniqueInsertDataWithTerminatingZero(pos, length));
+    idx.check(getDictionary().size());
 }
 
 StringRef ColumnWithDictionary::serializeValueIntoArena(size_t n, Arena & arena, char const *& begin) const
@@ -167,6 +176,8 @@ const char * ColumnWithDictionary::deserializeAndInsertFromArena(const char * po
 
     const char * new_pos;
     idx.insertPosition(dictionary.getColumnUnique().uniqueDeserializeAndInsertFromArena(pos, new_pos));
+
+    idx.check(getDictionary().size());
     return new_pos;
 }
 
@@ -446,6 +457,25 @@ void ColumnWithDictionary::Index::insertPositionsRange(const IColumn & column, s
         !insertForType(UInt64()))
         throw Exception("Invalid column for ColumnWithDictionary index. Expected ColumnUInt, got " + column.getName(),
                         ErrorCodes::ILLEGAL_COLUMN);
+}
+
+void ColumnWithDictionary::Index::check(size_t max_dictionary_size)
+{
+    auto copy = [&](auto cur_type)
+    {
+        using CurIndexType = decltype(cur_type);
+        auto & positions_data = getPositionsData<CurIndexType>();
+
+        for (size_t i = 0; i < positions_data.size(); ++i)
+        {
+            if (positions_data[i] >= max_dictionary_size)
+            {
+                throw Exception("Found index " + toString(positions_data[i]) + " at position " + toString(i)
+                                + " which is grated or equal than dictionary size " + toString(max_dictionary_size),
+                                ErrorCodes::LOGICAL_ERROR);
+            }
+        }
+    };
 }
 
 
