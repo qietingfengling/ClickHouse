@@ -172,8 +172,8 @@ private:
         void insertPosition(UInt64 position);
         void insertPositionsRange(const IColumn & column, size_t offset, size_t limit);
 
-        void popBack(size_t n) { positions->popBack(n); }
-        void reserve(size_t n) { positions->reserve(n); }
+        void popBack(size_t n) { positions->assumeMutableRef().popBack(n); }
+        void reserve(size_t n) { positions->assumeMutableRef().reserve(n); }
 
         UInt64 getMaxPositionForCurrentType() const;
 

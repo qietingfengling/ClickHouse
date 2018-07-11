@@ -226,7 +226,7 @@ void ColumnUnique<ColumnType>::buildIndex()
 }
 
 template <typename ColumnType>
-IndexType ColumnUnique<ColumnType>::insertIntoMap(const StringRefWrapper<ColumnType> & ref, IndexType value)
+UInt64 ColumnUnique<ColumnType>::insertIntoMap(const StringRefWrapper<ColumnType> & ref, UInt64 value)
 {
     if (!index)
         buildIndex();
@@ -249,7 +249,7 @@ size_t ColumnUnique<ColumnType>::uniqueInsert(const Field & x)
         return getNullValueIndex();
 
     auto column = getRawColumnPtr();
-    auto prev_size = static_cast<IndexType>(column->size());
+    auto prev_size = static_cast<UInt64>(column->size());
 
     if ((*column)[getDefaultValueIndex()] == x)
         return getDefaultValueIndex();
@@ -360,9 +360,10 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
     const NullMap * null_map = nullptr;
     auto & positions = positions_column->getData();
 
-    using SuperiorIndexType = NumberTraits::Construct<false, false, NumberTraits::nextSize(sizeof(IndexType))>::Type;
     auto updatePosition = [&](UInt64 & next_position, UInt64 num_added_rows) -> MutableColumnPtr
     {
+        using SuperiorIndexType = NumberTraits::Construct<false, false, NumberTraits::nextSize(sizeof(IndexType))>::Type;
+
         ++next_position;
 
         if (next_position > std::numeric_limits<IndexType>::max())
