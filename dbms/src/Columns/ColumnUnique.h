@@ -468,7 +468,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeFrom(const IColumn &
             auto positions_column = ColumnVector<IndexType>::create(length);
             auto & positions = positions_column->getData();
 
-            return uniqueInsertRangeImpl(src, start, length, positions, nullptr, 0);
+            return uniqueInsertRangeImpl<IndexType>(src, start, length, positions, nullptr, 0);
         }
 
         return nullptr;

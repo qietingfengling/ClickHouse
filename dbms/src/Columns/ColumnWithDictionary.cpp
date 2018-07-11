@@ -340,7 +340,7 @@ typename ColumnVector<IndexType>::Container & ColumnWithDictionary::Index::getPo
     auto * positions_ptr = typeid_cast<ColumnVector<IndexType> *>(positions->assumeMutable().get());
     if (!positions_ptr)
         throw Exception("Invalid indexes type for ColumnWithDictionary. Expected "
-                        + demangle(typeid(typename ColumnVector<IndexType>).name())
+                        + demangle(typeid(ColumnVector<IndexType>).name())
                         + ", got " + positions->getName(), ErrorCodes::LOGICAL_ERROR);
 
     return positions_ptr->getData();
@@ -401,7 +401,7 @@ void ColumnWithDictionary::Index::insertPosition(UInt64 position)
     while (position > getMaxPositionForCurrentType())
         expandType();
 
-    positions->insert(UInt64(position));
+    positions->assumeMutableRef().insert(UInt64(position));
 }
 
 void ColumnWithDictionary::Index::insertPositionsRange(const IColumn & column, size_t offset, size_t limit)
