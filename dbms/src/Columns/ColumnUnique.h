@@ -60,6 +60,8 @@ private:
     ColumnUnique(const ColumnUnique & other) : column_holder(other.column_holder), is_nullable(other.is_nullable) {}
 
 public:
+    MutableColumnPtr cloneEmpty() const override;
+
     ColumnPtr getNestedColumn() const override;
     const ColumnPtr & getNestedNotNullableColumn() const override { return column_holder; }
 
@@ -71,7 +73,6 @@ public:
     size_t uniqueInsertData(const char * pos, size_t length) override;
     size_t uniqueInsertDataWithTerminatingZero(const char * pos, size_t length) override;
     size_t uniqueDeserializeAndInsertFromArena(const char * pos, const char *& new_pos) override;
-    IColumnUnique::SerializableState getSerializableState() const override;
 
     size_t getDefaultValueIndex() const override { return is_nullable ? 1 : 0; }
     size_t getNullValueIndex() const override;
@@ -151,6 +152,12 @@ private:
         ColumnType * overflowed_keys,
         size_t max_dictionary_size);
 };
+
+template <typename ColumnType>
+MutableColumnPtr ColumnUnique<ColumnType>::cloneEmpty() const
+{
+    return ColumnUnique<ColumnType>::create(column_holder->cloneResized(numSpecialValues()), is_nullable);
+}
 
 template <typename ColumnType>
 ColumnUnique<ColumnType>::ColumnUnique(const IDataType & type) : is_nullable(type.isNullable())
@@ -524,17 +531,6 @@ IColumnUnique::IndexesWithOverflow ColumnUnique<ColumnType>::uniqueInsertRangeWi
     indexes_with_overflow.indexes = std::move(positions_column);
     indexes_with_overflow.overflowed_keys = std::move(overflowed_keys);
     return indexes_with_overflow;
-}
-
-template <typename ColumnType>
-IColumnUnique::SerializableState ColumnUnique<ColumnType>::getSerializableState() const
-{
-    IColumnUnique::SerializableState state;
-    state.column = column_holder;
-    state.offset = numSpecialValues();
-    state.limit = column_holder->size() - state.offset;
-
-    return state;
 }
 
 };

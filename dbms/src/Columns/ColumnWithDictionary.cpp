@@ -2,53 +2,172 @@
 #include <Columns/ColumnsNumber.h
 #include <DataStreams/ColumnGathererStream.h>
 #include <DataTypes/NumberTraits.h>
+#include <Common/HashTable/HashMap.h>
 
 namespace DB
 {
 
-ColumnWithDictionary::ColumnWithDictionary(MutableColumnPtr && column_unique_, MutableColumnPtr && indexes_)
-    : column_unique(std::move(column_unique_)), idx(std::move(indexes_))
+namespace
 {
-    if (!dynamic_cast<const IColumnUnique *>(column_unique.get()))
-        throw Exception("ColumnUnique expected as argument of ColumnWithDictionary.", ErrorCodes::ILLEGAL_COLUMN);
+    template <typename T>
+    PaddedPODArray<T> * getIndexesData(IColumn & indexes)
+    {
+        auto * column = typeid_cast<ColumnVector<T> *>(&indexes);
+        if (column)
+            return &column->getData();
+
+        return nullptr;
+    }
+
+    template <typename T>
+    MutableColumnPtr mapUniqueIndexImpl(PaddedPODArray<T> & index)
+    {
+        HashMap<T, T> hash_map;
+        for (auto val : index)
+            hash_map.insert({val, hash_map.size()});
+
+        auto res_col = ColumnVector<T>::create();
+        auto & data = res_col->getData();
+
+        data.resize(hash_map.size());
+        for (auto val : hash_map)
+            data[val.second] = val.first;
+
+        for (auto & ind : index)
+            ind = hash_map[ind];
+
+        return std::move(res_col);
+    }
+
+    /// Returns unique values of column. Write new index to column.
+    MutableColumnPtr mapUniqueIndex(IColumn & column)
+    {
+        if (auto * data_uint8 = getIndexesData<UInt8>(column))
+            return mapUniqueIndexImpl(*data_uint8);
+        else if (auto * data_uint16 = getIndexesData<UInt16>(column))
+            return mapUniqueIndexImpl(*data_uint16);
+        else if (auto * data_uint32 = getIndexesData<UInt32>(column))
+            return mapUniqueIndexImpl(*data_uint32);
+        else if (auto * data_uint64 = getIndexesData<UInt64>(column))
+            return mapUniqueIndexImpl(*data_uint64);
+        else
+            throw Exception("Indexes column for getUniqueIndex must be ColumnUInt, got" + column.getName(),
+                            ErrorCodes::LOGICAL_ERROR);
+    }
+}
+
+
+ColumnWithDictionary::ColumnWithDictionary(MutableColumnPtr && column_unique_, MutableColumnPtr && indexes_)
+    : dictionary(std::move(column_unique_)), idx(std::move(indexes_))
+{
+}
+
+void ColumnWithDictionary::insert(const Field & x)
+{
+    compactIfSharedDictionary();
+    idx.insertPosition(dictionary.getColumnUnique().uniqueInsert(x));
+}
+
+void ColumnWithDictionary::insertDefault()
+{
+    idx.insertPosition(getDictionary().getDefaultValueIndex());
 }
 
 void ColumnWithDictionary::insertFrom(const IColumn & src, size_t n)
 {
-    if (!typeid_cast<const ColumnWithDictionary *>(&src))
+    auto * src_with_dict = typeid_cast<const ColumnWithDictionary *>(&src);
+
+    if (!src_with_dict)
         throw Exception("Expected ColumnWithDictionary, got" + src.getName(), ErrorCodes::ILLEGAL_COLUMN);
 
-    auto & src_with_dict = static_cast<const ColumnWithDictionary &>(src);
-    size_t position = src_with_dict.getIndexes().getUInt(n);
-    insertFromFullColumn(*src_with_dict.getUnique().getNestedColumn(), position);
+    size_t position = src_with_dict->getIndexes().getUInt(n);
+
+    if (&src_with_dict->getDictionary() == &getDictionary())
+    {
+        /// Dictionary is shared with src column. Insert only index.
+        idx.insertPosition(position);
+    }
+    else
+    {
+        compactIfSharedDictionary();
+        const auto & nested = *src_with_dict->getDictionary().getNestedColumn();
+        idx.insertPosition(dictionary.getColumnUnique().uniqueInsertFrom(nested, position));
+    }
+}
+
+void ColumnWithDictionary::insertFromFullColumn(const IColumn & src, size_t n)
+{
+    compactIfSharedDictionary();
+    idx.insertPosition(dictionary.getColumnUnique().uniqueInsertFrom(src, n));
 }
 
 void ColumnWithDictionary::insertRangeFrom(const IColumn & src, size_t start, size_t length)
 {
-    if (!typeid_cast<const ColumnWithDictionary *>(&src))
+    auto * src_with_dict = typeid_cast<const ColumnWithDictionary *>(&src);
+
+    if (!src_with_dict)
         throw Exception("Expected ColumnWithDictionary, got" + src.getName(), ErrorCodes::ILLEGAL_COLUMN);
 
-    auto & src_with_dict = static_cast<const ColumnWithDictionary &>(src);
-
-    if (&src_with_dict.getUnique() == &getUnique())
+    if (&src_with_dict->getDictionary() == &getDictionary())
     {
         /// Dictionary is shared with src column. Insert only indexes.
-        idx.insertPositionsRange(src_with_dict.getIndexes(), start, length);
+        idx.insertPositionsRange(src_with_dict->getIndexes(), start, length);
     }
     else
     {
+        compactIfSharedDictionary();
+
         /// TODO: Support native insertion from other unique column. It will help to avoid null map creation.
-        auto src_nested = src_with_dict.getUnique().getNestedColumn();
-        auto inserted_idx = getUnique().uniqueInsertRangeFrom(*src_nested, 0, src_nested->size());
-        auto indexes = inserted_idx->index(*src_with_dict.getIndexes().cut(start, length), 0);
-        idx.insertPositionsRange(*indexes, 0, length);
+
+        auto sub_idx = (*src_with_dict->getIndexes().cut(start, length)).mutate();
+        auto idx_map = mapUniqueIndex(*sub_idx);
+
+        auto src_nested = src_with_dict->getDictionary().getNestedColumn();
+        auto used_keys = src_nested->index(*idx_map, 0);
+
+        auto idx_to_insert = dictionary.getColumnUnique().uniqueInsertRangeFrom(*used_keys, 0, used_keys->size());
+        idx.insertPositionsRange(*idx_to_insert, 0, length);
     }
 }
 
 void ColumnWithDictionary::insertRangeFromFullColumn(const IColumn & src, size_t start, size_t length)
 {
-    auto inserted_indexes = getUnique().uniqueInsertRangeFrom(src, start, length);
+    compactIfSharedDictionary();
+    auto inserted_indexes = dictionary.getColumnUnique().uniqueInsertRangeFrom(src, start, length);
     idx.insertPositionsRange(*inserted_indexes, 0, length);
+}
+
+void ColumnWithDictionary::insertRangeFromDictionaryEncodedColumn(const IColumn & keys, const IColumn & positions)
+{
+    compactIfSharedDictionary();
+    auto inserted_indexes = dictionary.getColumnUnique().uniqueInsertRangeFrom(keys, 0, keys.size());
+    idx.insertPositionsRange(*inserted_indexes->index(positions, 0), 0, positions.size());
+}
+
+void ColumnWithDictionary::insertData(const char * pos, size_t length)
+{
+    compactIfSharedDictionary();
+    idx.insertPosition(dictionary.getColumnUnique().uniqueInsertData(pos, length));
+}
+
+void ColumnWithDictionary::insertDataWithTerminatingZero(const char * pos, size_t length)
+{
+    compactIfSharedDictionary();
+    idx.insertPosition(dictionary.getColumnUnique().uniqueInsertDataWithTerminatingZero(pos, length));
+}
+
+StringRef ColumnWithDictionary::serializeValueIntoArena(size_t n, Arena & arena, char const *& begin) const
+{
+    return getDictionary().serializeValueIntoArena(getIndexes().getUInt(n), arena, begin);
+}
+
+const char * ColumnWithDictionary::deserializeAndInsertFromArena(const char * pos)
+{
+    compactIfSharedDictionary();
+
+    const char * new_pos;
+    idx.insertPosition(dictionary.getColumnUnique().uniqueDeserializeAndInsertFromArena(pos, new_pos));
+    return new_pos;
 }
 
 void ColumnWithDictionary::gather(ColumnGathererStream & gatherer)
@@ -58,7 +177,7 @@ void ColumnWithDictionary::gather(ColumnGathererStream & gatherer)
 
 MutableColumnPtr ColumnWithDictionary::cloneResized(size_t size) const
 {
-    auto unique_ptr = column_unique;
+    auto unique_ptr = dictionary.getColumnUniquePtr();
     return ColumnWithDictionary::create((*std::move(unique_ptr)).mutate(), getIndexes().cloneResized(size));
 }
 
@@ -67,7 +186,7 @@ int ColumnWithDictionary::compareAt(size_t n, size_t m, const IColumn & rhs, int
     const auto & column_with_dictionary = static_cast<const ColumnWithDictionary &>(rhs);
     size_t n_index = getIndexes().getUInt(n);
     size_t m_index = column_with_dictionary.getIndexes().getUInt(m);
-    return getUnique().compareAt(n_index, m_index, *column_with_dictionary.column_unique, nan_direction_hint);
+    return getDictionary().compareAt(n_index, m_index, column_with_dictionary.getDictionary(), nan_direction_hint);
 }
 
 void ColumnWithDictionary::getPermutation(bool reverse, size_t limit, int nan_direction_hint, Permutation & res) const
@@ -75,14 +194,14 @@ void ColumnWithDictionary::getPermutation(bool reverse, size_t limit, int nan_di
     if (limit == 0)
         limit = size();
 
-    size_t unique_limit = std::min(limit, getUnique().size());
+    size_t unique_limit = std::min(limit, getDictionary().size());
     Permutation unique_perm;
-    getUnique().getNestedColumn()->getPermutation(reverse, unique_limit, nan_direction_hint, unique_perm);
+    getDictionary().getNestedColumn()->getPermutation(reverse, unique_limit, nan_direction_hint, unique_perm);
 
     /// TODO: optimize with sse.
 
     /// Get indexes per row in column_unique.
-    std::vector<std::vector<size_t>> indexes_per_row(getUnique().size());
+    std::vector<std::vector<size_t>> indexes_per_row(getDictionary().size());
     size_t indexes_size = getIndexes().size();
     for (size_t row = 0; row < indexes_size; ++row)
         indexes_per_row[getIndexes().getUInt(row)].push_back(row);
@@ -110,23 +229,53 @@ std::vector<MutableColumnPtr> ColumnWithDictionary::scatter(ColumnIndex num_colu
     auto columns = getIndexes().scatter(num_columns, selector);
     for (auto & column : columns)
     {
-        auto unique_ptr = column_unique;
+        auto unique_ptr = dictionary.getColumnUniquePtr();
         column = ColumnWithDictionary::create((*std::move(unique_ptr)).mutate(), std::move(column));
     }
 
     return columns;
 }
 
-void ColumnWithDictionary::setUnique(const ColumnPtr & unique)
+void ColumnWithDictionary::setSharedDictionary(const ColumnPtr & column_unique)
 {
-    if (!dynamic_cast<const IColumnUnique *>(column_unique.get()))
-        throw Exception("ColumnUnique expected as argument of ColumnWithDictionary.", ErrorCodes::ILLEGAL_COLUMN);
-
     if (!empty())
         throw Exception("Can't set ColumnUnique for ColumnWithDictionary because is't not empty.",
                         ErrorCodes::LOGICAL_ERROR);
 
-    column_unique = unique;
+    dictionary.setShared(column_unique);
+}
+
+ColumnWithDictionary::MutablePtr ColumnWithDictionary::compact()
+{
+    auto positions = idx.getPositions();
+    /// Create column with new indexes and old dictionary.
+    auto column = ColumnWithDictionary::create(getDictionary().assumeMutable(), (*std::move(positions)).mutate());
+    /// Will create new dictionary.
+    column->compactInplace();
+
+    return column;
+}
+
+ColumnWithDictionary::MutablePtr ColumnWithDictionary::cutAndCompact(size_t start, size_t length) const
+{
+    auto sub_positions = (*idx.getPositions()->cut(start, length)).mutate();
+    /// Create column with new indexes and old dictionary.
+    auto column = ColumnWithDictionary::create(getDictionary().assumeMutable(), std::move(sub_positions));
+    /// Will create new dictionary.
+    column->compactInplace();
+
+    return column;
+}
+
+void ColumnWithDictionary::compactInplace()
+{
+    dictionary.compact(idx.getPositions());
+}
+
+void ColumnWithDictionary::compactIfSharedDictionary()
+{
+    if (dictionary.isShared())
+        compactInplace();
 }
 
 
@@ -297,6 +446,50 @@ void ColumnWithDictionary::Index::insertPositionsRange(const IColumn & column, s
         !insertForType(UInt64()))
         throw Exception("Invalid column for ColumnWithDictionary index. Expected ColumnUInt, got " + column.getName(),
                         ErrorCodes::ILLEGAL_COLUMN);
+}
+
+
+ColumnWithDictionary::Dictionary::Dictionary(MutableColumnPtr && column_unique_)
+    : column_unique(std::move(column_unique_))
+{
+    checkColumn(*column_unique);
+}
+ColumnWithDictionary::Dictionary::Dictionary(ColumnPtr column_unique_)
+    : column_unique(std::move(column_unique_))
+{
+    checkColumn(*column_unique);
+}
+
+void ColumnWithDictionary::Dictionary::checkColumn(const IColumn & column)
+{
+
+    if (!dynamic_cast<const IColumnUnique *>(&column))
+        throw Exception("ColumnUnique expected as argument of ColumnWithDictionary.", ErrorCodes::ILLEGAL_COLUMN);
+}
+
+void ColumnWithDictionary::Dictionary::setShared(const ColumnPtr & dictionary)
+{
+    checkColumn(*dictionary);
+
+    column_unique = dictionary;
+    shared = true;
+}
+
+void ColumnWithDictionary::Dictionary::compact(ColumnPtr & positions)
+{
+    auto new_column_unique = column_unique->cloneEmpty();
+
+    auto & unique = getColumnUnique();
+    auto & new_unique = static_cast<IColumnUnique &>(*new_column_unique);
+
+    auto indexes = mapUniqueIndex(positions->assumeMutableRef());
+    auto sub_keys = unique.getNestedColumn()->index(*indexes, 0);
+    auto new_indexes = new_unique.uniqueInsertRangeFrom(*sub_keys, 0, sub_keys->size());
+
+    positions = (*new_indexes->index(*positions, 0)).mutate();
+    column_unique = std::move(new_column_unique);
+
+    shared = false;
 }
 
 }

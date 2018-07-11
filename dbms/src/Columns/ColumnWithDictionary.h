@@ -37,82 +37,68 @@ public:
     std::string getName() const override { return "ColumnWithDictionary"; }
     const char * getFamilyName() const override { return "ColumnWithDictionary"; }
 
-    ColumnPtr convertToFullColumn() const { return getUnique().getNestedColumn()->index(getIndexes(), 0); }
+    ColumnPtr convertToFullColumn() const { return getDictionary().getNestedColumn()->index(getIndexes(), 0); }
     ColumnPtr convertToFullColumnIfWithDictionary() const override { return convertToFullColumn(); }
 
     MutableColumnPtr cloneResized(size_t size) const override;
     size_t size() const override { return getIndexes().size(); }
 
-    Field operator[](size_t n) const override { return (*column_unique)[getIndexes().getUInt(n)]; }
-    void get(size_t n, Field & res) const override { column_unique->get(getIndexes().getUInt(n), res); }
+    Field operator[](size_t n) const override { return getDictionary()[getIndexes().getUInt(n)]; }
+    void get(size_t n, Field & res) const override { getDictionary().get(getIndexes().getUInt(n), res); }
 
-    StringRef getDataAt(size_t n) const override { return column_unique->getDataAt(getIndexes().getUInt(n)); }
+    StringRef getDataAt(size_t n) const override { return getDictionary().getDataAt(getIndexes().getUInt(n)); }
     StringRef getDataAtWithTerminatingZero(size_t n) const override
     {
-        return column_unique->getDataAtWithTerminatingZero(getIndexes().getUInt(n));
+        return getDictionary().getDataAtWithTerminatingZero(getIndexes().getUInt(n));
     }
 
-    UInt64 get64(size_t n) const override { return column_unique->get64(getIndexes().getUInt(n)); }
-    UInt64 getUInt(size_t n) const override { return column_unique->getUInt(getIndexes().getUInt(n)); }
-    Int64 getInt(size_t n) const override { return column_unique->getInt(getIndexes().getUInt(n)); }
-    bool isNullAt(size_t n) const override { return column_unique->isNullAt(getIndexes().getUInt(n)); }
+    UInt64 get64(size_t n) const override { return getDictionary().get64(getIndexes().getUInt(n)); }
+    UInt64 getUInt(size_t n) const override { return getDictionary().getUInt(getIndexes().getUInt(n)); }
+    Int64 getInt(size_t n) const override { return getDictionary().getInt(getIndexes().getUInt(n)); }
+    bool isNullAt(size_t n) const override { return getDictionary().isNullAt(getIndexes().getUInt(n)); }
     ColumnPtr cut(size_t start, size_t length) const override
     {
-        return ColumnWithDictionary::create(column_unique, getIndexes().cut(start, length));
+        return ColumnWithDictionary::create(dictionary.getColumnUniquePtr(), getIndexes().cut(start, length));
     }
 
-    void insert(const Field & x) override { idx.insertPosition(getUnique().uniqueInsert(x)); }
+    void insert(const Field & x) override;
+    void insertDefault() override { idx.insertPosition(getDictionary().getDefaultValueIndex()); }
 
     void insertFrom(const IColumn & src, size_t n) override;
-    void insertFromFullColumn(const IColumn & src, size_t n) { idx.insertPosition(getUnique().uniqueInsertFrom(src, n)); }
+    void insertFromFullColumn(const IColumn & src, size_t n);
 
     void insertRangeFrom(const IColumn & src, size_t start, size_t length) override;
     void insertRangeFromFullColumn(const IColumn & src, size_t start, size_t length);
+    void insertRangeFromDictionaryEncodedColumn(const IColumn & keys, const IColumn & positions);
 
-    void insertData(const char * pos, size_t length) override
-    {
-        idx.insertPosition(getUnique().uniqueInsertData(pos, length));
-    }
+    void insertData(const char * pos, size_t length) override;
+    void insertDataWithTerminatingZero(const char * pos, size_t length) override;
 
-    void insertDataWithTerminatingZero(const char * pos, size_t length) override
-    {
-        idx.insertPosition(getUnique().uniqueInsertDataWithTerminatingZero(pos, length));
-    }
-
-    void insertDefault() override { idx.insertPosition(getUnique().getDefaultValueIndex()); }
 
     void popBack(size_t n) override { idx.getPositions()->popBack(n); }
 
-    StringRef serializeValueIntoArena(size_t n, Arena & arena, char const *& begin) const override
-    {
-        return getUnique().serializeValueIntoArena(getIndexes().getUInt(n), arena, begin);
-    }
+    StringRef serializeValueIntoArena(size_t n, Arena & arena, char const *& begin) const override;
 
-    const char * deserializeAndInsertFromArena(const char * pos) override
-    {
-        const char * new_pos;
-        idx.insertPosition(getUnique().uniqueDeserializeAndInsertFromArena(pos, new_pos));
-        return new_pos;
-    }
+    const char * deserializeAndInsertFromArena(const char * pos) override;
 
     void updateHashWithValue(size_t n, SipHash & hash) const override
     {
-        return getUnique().updateHashWithValue(getIndexes().getUInt(n), hash);
+        return getDictionary().updateHashWithValue(getIndexes().getUInt(n), hash);
     }
 
     ColumnPtr filter(const Filter & filt, ssize_t result_size_hint) const override
     {
-        return ColumnWithDictionary::create(column_unique, getIndexes().filter(filt, result_size_hint));
+        return ColumnWithDictionary::create(dictionary.getColumnUniquePtr(), getIndexes().filter(filt, result_size_hint));
     }
 
     ColumnPtr permute(const Permutation & perm, size_t limit) const override
     {
-        return ColumnWithDictionary::create(column_unique, getIndexes().permute(perm, limit));
+        return ColumnWithDictionary::create(dictionary.getColumnUniquePtr(), getIndexes().permute(perm, limit));
     }
 
     ColumnPtr index(const IColumn & indexes_, size_t limit) const override
     {
-        return ColumnWithDictionary::create(column_unique, getIndexes().index(indexes_, limit));
+        return ColumnWithDictionary::create(dictionary.getColumnUniquePtr(), getIndexes().index(indexes_, limit));
     }
 
     int compareAt(size_t n, size_t m, const IColumn & rhs, int nan_direction_hint) const override;
@@ -121,42 +107,53 @@ public:
 
     ColumnPtr replicate(const Offsets & offsets) const override
     {
-        return ColumnWithDictionary::create(column_unique, getIndexes().replicate(offsets));
+        return ColumnWithDictionary::create(dictionary.getColumnUniquePtr(), getIndexes().replicate(offsets));
     }
 
     std::vector<MutableColumnPtr> scatter(ColumnIndex num_columns, const Selector & selector) const override;
 
     void gather(ColumnGathererStream & gatherer_stream) override ;
-    void getExtremes(Field & min, Field & max) const override { return column_unique->getExtremes(min, max); }
+    void getExtremes(Field & min, Field & max) const override {
+        return getDictionary().index(getIndexes(), 0)->getExtremes(min, max); /// TODO: optimize
+    }
 
     void reserve(size_t n) override { idx.getPositions()->reserve(n); }
 
-    size_t byteSize() const override { return idx.getPositions()->byteSize() + column_unique->byteSize(); }
-    size_t allocatedBytes() const override { return idx.getPositions()->allocatedBytes() + column_unique->allocatedBytes(); }
+    size_t byteSize() const override { return idx.getPositions()->byteSize() + getDictionary().byteSize(); }
+    size_t allocatedBytes() const override { return idx.getPositions()->allocatedBytes() + getDictionary().allocatedBytes(); }
 
     void forEachSubcolumn(ColumnCallback callback) override
     {
-        callback(column_unique);
         callback(idx.getPositions());
+
+        /// Column doesn't own dictionary if it's shared.
+        if (!dictionary.isShared())
+            callback(dictionary.getColumnUnique());
     }
 
-    bool valuesHaveFixedSize() const override { return column_unique->valuesHaveFixedSize(); }
-    bool isFixedAndContiguous() const override { return column_unique->isFixedAndContiguous(); }
-    size_t sizeOfValueIfFixed() const override { return column_unique->sizeOfValueIfFixed(); }
-    bool isNumeric() const override { return column_unique->isNumeric(); }
+    bool valuesHaveFixedSize() const override { return getDictionary().valuesHaveFixedSize(); }
+    bool isFixedAndContiguous() const override { return getDictionary().isFixedAndContiguous(); }
+    size_t sizeOfValueIfFixed() const override { return getDictionary().sizeOfValueIfFixed(); }
+    bool isNumeric() const override { return getDictionary().isNumeric(); }
 
-    const IColumnUnique & getUnique() const { return static_cast<const IColumnUnique &>(*column_unique->assumeMutable()); }
-    IColumnUnique & getUnique() { return static_cast<IColumnUnique &>(*column_unique->assumeMutable()); }
-    ColumnPtr getUniquePtr() const { return column_unique; }
+    const IColumnUnique & getDictionary() const { return dictionary.getColumnUnique(); }
+    /// IColumnUnique & getUnique() { return static_cast<IColumnUnique &>(*column_unique->assumeMutable()); }
+    /// ColumnPtr getUniquePtr() const { return column_unique; }
 
-    IColumn & getIndexes() { return idx.getPositions()->assumeMutableRef(); }
+    /// IColumn & getIndexes() { return idx.getPositions()->assumeMutableRef(); }
     const IColumn & getIndexes() const { return *idx.getPositions(); }
     const ColumnPtr & getIndexesPtr() const { return idx.getPositions(); }
 
     ///void setIndexes(MutableColumnPtr && indexes_) { indexes = std::move(indexes_); }
 
     /// Set shared ColumnUnique for empty column with dictionary.
-    void setUnique(const ColumnPtr & unique);
+    void setSharedDictionary(const ColumnPtr & column_unique);
+
+    /// Create column new dictionary with only keys that are mentioned in index.
+    MutablePtr compact();
+
+    /// Cut + compact.
+    MutablePtr cutAndCompact(size_t start, size_t length) const;
 
     bool withDictionary() const override { return true; }
 
@@ -196,8 +193,39 @@ private:
         static void callForType(Callback && callback, size_t size_of_type);
     };
 
-    ColumnPtr column_unique;
+    class Dictionary
+    {
+    public:
+        Dictionary(const Dictionary & other) = default;
+        explicit Dictionary(MutableColumnPtr && column_unique);
+        explicit Dictionary(ColumnPtr column_unique);
+
+        const ColumnPtr & getColumnUniquePtr() const { return column_unique; }
+        ColumnPtr & getColumnUniquePtr() { return column_unique; }
+
+        const IColumnUnique & getColumnUnique() const { return static_cast<const IColumnUnique &>(*column_unique); }
+        IColumnUnique & getColumnUnique() { return static_cast<IColumnUnique &>(*column_unique); }
+
+        /// Dictionary may be shared for several mutable columns.
+        /// Immutable columns may have the same column unique, which isn't necessarily shared dictionary.
+        void setShared(const ColumnPtr & dictionary);
+        bool isShared() const { return shared; }
+
+        /// Create new dictionary with only keys that are mentioned in positions.
+        void compact(ColumnPtr & positions);
+
+    private:
+        ColumnPtr column_unique;
+        bool shared = false;
+
+        void checkColumn(const IColumn & column);
+    };
+
+    Dictionary dictionary;
     Index idx;
+
+    void compactInplace();
+    void compactIfSharedDictionary();
 };
 
 

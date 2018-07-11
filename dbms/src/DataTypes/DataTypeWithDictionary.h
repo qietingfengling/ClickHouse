@@ -145,6 +145,7 @@ public:
     bool withDictionary() const override { return true; }
 
     static MutableColumnUniquePtr createColumnUnique(const IDataType & keys_type);
+    static MutableColumnUniquePtr createColumnUnique(const IDataType & keys_type, MutableColumnPtr && keys);
 
 private:
 
@@ -162,11 +163,8 @@ private:
     void deserializeImpl(IColumn & column, ReadBuffer & istr,
                          DeserealizeFunctionPtr<Args ...> func, Args & ... args) const;
 
-    template <typename ColumnType>
-    static MutableColumnUniquePtr createColumnUniqueImpl(const IDataType & keys_type);
-
-
-    friend struct CreateColumnVector;
+    template <typename Creator>
+    static MutableColumnUniquePtr createColumnUniqueImpl(const IDataType & keys_type, const Creator & creator);
 };
 
 }
