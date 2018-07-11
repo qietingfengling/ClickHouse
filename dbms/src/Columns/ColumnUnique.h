@@ -452,7 +452,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
         }
     }
 
-    return positions_column;
+    return std::move(positions_column);
 }
 
 template <typename ColumnType>
