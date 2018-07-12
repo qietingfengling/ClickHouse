@@ -329,6 +329,26 @@ void MergeTreeReader::Stream::seekToMark(size_t index)
 }
 
 
+void MergeTreeReader::Stream::seekToStart()
+{
+    try
+    {
+        if (cached_buffer)
+            cached_buffer->seek(0, 0);
+        if (non_cached_buffer)
+            non_cached_buffer->seek(0, 0);
+    }
+    catch (Exception & e)
+    {
+        /// Better diagnostics.
+        if (e.code() == ErrorCodes::ARGUMENT_OUT_OF_BOUND)
+            e.addMessage("(while seeking to start of column " + path_prefix + ")");
+
+        throw;
+    }
+}
+
+
 void MergeTreeReader::addStreams(const String & name, const IDataType & type, const MarkRanges & all_mark_ranges,
     const ReadBufferFromFileBase::ProfileCallback & profile_callback, clockid_t clock_type)
 {
@@ -379,7 +399,12 @@ void MergeTreeReader::readData(
 
             Stream & stream = *it->second;
 
-            if (!continue_reading && !stream_for_prefix)
+            if (stream_for_prefix)
+            {
+                stream.seekToStart();
+                continue_reading = false;
+            }
+            else if (!continue_reading)
                 stream.seekToMark(from_mark);
 
             return stream.data_buffer;
