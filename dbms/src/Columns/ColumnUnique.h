@@ -424,7 +424,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
     auto column = getRawColumnPtr();
 
     UInt64 next_position = column->size();
-    for (; num_added_rows > length; ++num_added_rows)
+    for (; num_added_rows < length; ++num_added_rows)
     {
         auto row = start + num_added_rows;
 
