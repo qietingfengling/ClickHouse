@@ -343,6 +343,21 @@ size_t ColumnUnique<ColumnType>::uniqueDeserializeAndInsertFromArena(const char 
     return static_cast<size_t>(index_pos);
 }
 
+template <typename IndexType>
+static void checkIndexes(const ColumnVector<IndexType> & indexes, size_t max_dictionary_size)
+{
+    auto & data = indexes.getData();
+    for (size_t i = 0; i < data.size(); ++i)
+    {
+        if (data[i] >= max_dictionary_size)
+        {
+            throw Exception("Found index " + toString(data[i]) + " at position " + toString(i)
+                            + " which is grated or equal than dictionary size " + toString(max_dictionary_size),
+                            ErrorCodes::LOGICAL_ERROR);
+        }
+    }
+}
+
 template <typename ColumnType>
 template <typename IndexType>
 MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
@@ -451,6 +466,8 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                 positions[i] = it->second;
         }
     }
+
+    checkIndexes(positions_column, column->size());
 
     return std::move(positions_column);
 }
