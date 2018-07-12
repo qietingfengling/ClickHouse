@@ -479,11 +479,10 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
 
         auto & global_dictionary = state_with_dictionary->global_dictionary;
         const auto & additional_keys = state_with_dictionary->additional_keys;
-        auto & column_unique = column_with_dictionary.getDictionary();
 
         bool has_additional_keys = state_with_dictionary->additional_keys != nullptr;
         bool column_is_empty = column_with_dictionary.empty();
-        bool column_with_global_dictionary = &column_unique == global_dictionary.get();
+        bool column_with_global_dictionary = &column_with_dictionary.getDictionary() == global_dictionary.get();
 
         if (!has_additional_keys && (column_is_empty || column_with_global_dictionary))
         {
@@ -500,7 +499,7 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         else
         {
             auto index_map = mapIndexWithOverflow(*indexes_column, global_dictionary->size());
-            auto keys = (*std::move(column_unique.getNestedColumn()->index(*index_map, 0))).mutate();
+            auto keys = (*std::move(global_dictionary->getNestedColumn()->index(*index_map, 0))).mutate();
 
             if (additional_keys)
                 keys->insertRangeFrom(*additional_keys, 0, additional_keys->size());
