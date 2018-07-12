@@ -129,8 +129,8 @@ void ColumnWithDictionary::insertRangeFrom(const IColumn & src, size_t start, si
         auto src_nested = src_with_dict->getDictionary().getNestedColumn();
         auto used_keys = src_nested->index(*idx_map, 0);
 
-        auto idx_to_insert = dictionary.getColumnUnique().uniqueInsertRangeFrom(*used_keys, 0, used_keys->size());
-        idx.insertPositionsRange(*idx_to_insert, 0, length);
+        auto inserted_indexes = dictionary.getColumnUnique().uniqueInsertRangeFrom(*used_keys, 0, used_keys->size());
+        idx.insertPositionsRange(*inserted_indexes->index(*sub_idx, 0), 0, length);
     }
     idx.check(getDictionary().size());
 }
