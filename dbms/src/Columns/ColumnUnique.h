@@ -443,7 +443,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                     auto jt = secondary_index->find(StringRefWrapper<ColumnType>(src_column, row));
                     if (jt == secondary_index->end())
                     {
-                        positions[i] = next_position;
+                        positions[num_added_rows] = next_position;
                         auto ref = src_column->getDataAt(row);
                         overflowed_keys->insertData(ref.data, ref.size);
                         (*secondary_index)[StringRefWrapper<ColumnType>(src_column, row)] = next_position;
@@ -452,11 +452,11 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                             return res;
                     }
                     else
-                        positions[i] = jt->second;
+                        positions[num_added_rows] = jt->second;
                 }
                 else
                 {
-                    positions[i] = next_position;
+                    positions[num_added_rows] = next_position;
                     auto ref = src_column->getDataAt(row);
                     column->insertData(ref.data, ref.size);
                     (*index)[StringRefWrapper<ColumnType>(column, next_position)] = next_position;
