@@ -467,7 +467,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
         }
     }
 
-    checkIndexes(positions_column, column->size());
+    checkIndexes(*positions_column, column->size());
 
     return std::move(positions_column);
 }
