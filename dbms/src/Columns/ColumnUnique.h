@@ -148,6 +148,7 @@ private:
         const IColumn & src,
         size_t start,
         size_t length,
+        size_t num_added_rows,
         typename ColumnVector<IndexType>::MutablePtr && positions_column,
         ColumnType * overflowed_keys,
         size_t max_dictionary_size);
@@ -364,6 +365,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
     const IColumn & src,
     size_t start,
     size_t length,
+    size_t num_added_rows,
     typename ColumnVector<IndexType>::MutablePtr && positions_column,
     ColumnType * overflowed_keys,
     size_t max_dictionary_size)
@@ -375,7 +377,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
     const NullMap * null_map = nullptr;
     auto & positions = positions_column->getData();
 
-    auto updatePosition = [&](UInt64 & next_position, UInt64 num_added_rows) -> MutableColumnPtr
+    auto updatePosition = [&](UInt64 & next_position) -> MutableColumnPtr
     {
         constexpr auto next_size = NumberTraits::nextSize(sizeof(IndexType));
         using SuperiorIndexType = typename NumberTraits::Construct<false, false, next_size>::Type;
@@ -388,15 +390,16 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                 throw Exception("Can't find superior index type for type " + demangle(typeid(IndexType).name()),
                                 ErrorCodes::LOGICAL_ERROR);
 
-            auto expanded_column = ColumnVector<SuperiorIndexType>::create(positions_column->size());
+            auto expanded_column = ColumnVector<SuperiorIndexType>::create(length);
             auto & expanded_data = expanded_column->getData();
             for (size_t i = 0; i < num_added_rows; ++i)
                 expanded_data[i] = positions[i];
 
             return uniqueInsertRangeImpl<SuperiorIndexType>(
                     src,
-                    start + num_added_rows,
-                    length - num_added_rows,
+                    start,
+                    length,
+                    num_added_rows,
                     std::move(expanded_column),
                     overflowed_keys,
                     max_dictionary_size);
@@ -421,14 +424,14 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
     auto column = getRawColumnPtr();
 
     UInt64 next_position = column->size();
-    for (auto i : ext::range(0, length))
+    for (; num_added_rows > length; ++num_added_rows)
     {
-        auto row = start + i;
+        auto row = start + num_added_rows;
 
         if (null_map && (*null_map)[row])
-            positions[i] = getNullValueIndex();
+            positions[num_added_rows] = getNullValueIndex();
         else if (column->compareAt(getDefaultValueIndex(), row, *src_column, 1) == 0)
-            positions[i] = getDefaultValueIndex();
+            positions[num_added_rows] = getDefaultValueIndex();
         else
         {
             auto it = index->find(StringRefWrapper<ColumnType>(src_column, row));
@@ -445,7 +448,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                         overflowed_keys->insertData(ref.data, ref.size);
                         (*secondary_index)[StringRefWrapper<ColumnType>(src_column, row)] = next_position;
 
-                        if (auto res = updatePosition(next_position, i))
+                        if (auto res = updatePosition(next_position))
                             return res;
                     }
                     else
@@ -458,12 +461,12 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                     column->insertData(ref.data, ref.size);
                     (*index)[StringRefWrapper<ColumnType>(column, next_position)] = next_position;
 
-                    if (auto res = updatePosition(next_position, i))
+                    if (auto res = updatePosition(next_position))
                         return res;
                 }
             }
             else
-                positions[i] = it->second;
+                positions[num_added_rows] = it->second;
         }
     }
 
@@ -483,8 +486,8 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeFrom(const IColumn &
         using IndexType = decltype(x);
         if (size <= std::numeric_limits<IndexType>::max())
         {
-            auto positions_column = ColumnVector<IndexType>::create(length);
-            return this->uniqueInsertRangeImpl<IndexType>(src, start, length, std::move(positions_column), nullptr, 0);
+            auto positions = ColumnVector<IndexType>::create(length);
+            return this->uniqueInsertRangeImpl<IndexType>(src, start, length, 0, std::move(positions), nullptr, 0);
         }
 
         return nullptr;
@@ -525,9 +528,9 @@ IColumnUnique::IndexesWithOverflow ColumnUnique<ColumnType>::uniqueInsertRangeWi
         using IndexType = decltype(x);
         if (size <= std::numeric_limits<IndexType>::max())
         {
-            auto positions_column = ColumnVector<IndexType>::create(length);
-            return uniqueInsertRangeImpl<IndexType>(src, start, length, std::move(positions_column),
-                                                    overflowed_keys_ptr, max_dictionary_size);
+            auto positions = ColumnVector<IndexType>::create(length);
+            return this->uniqueInsertRangeImpl<IndexType>(src, start, length, 0, std::move(positions),
+                                                          overflowed_keys_ptr, max_dictionary_size);
         }
 
         return nullptr;
