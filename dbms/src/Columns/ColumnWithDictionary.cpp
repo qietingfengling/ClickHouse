@@ -341,7 +341,7 @@ size_t ColumnWithDictionary::Index::getSizeOfIndexType(const IColumn & column, s
     if (auto size = tryGetSizeFor(UInt64()))
         return size;
 
-    throw Exception("Unexpected indexes type for ColumnWithDictionary. Expected ColumnUInt, got " + column.getName(),
+    throw Exception("Unexpected indexes type for ColumnWithDictionary. Expected UInt, got " + column.getName(),
                     ErrorCodes::ILLEGAL_COLUMN);
 }
 
@@ -350,9 +350,9 @@ typename ColumnVector<IndexType>::Container & ColumnWithDictionary::Index::getPo
 {
     auto * positions_ptr = typeid_cast<ColumnVector<IndexType> *>(positions->assumeMutable().get());
     if (!positions_ptr)
-        throw Exception("Invalid indexes type for ColumnWithDictionary. Expected "
-                        + demangle(typeid(ColumnVector<IndexType>).name())
-                        + ", got " + positions->getName(), ErrorCodes::LOGICAL_ERROR);
+        throw Exception("Invalid indexes type for ColumnWithDictionary."
+                        " Expected UInt" + toString(8 * sizeof(IndexType)) + ", got " + positions->getName(),
+                        ErrorCodes::LOGICAL_ERROR);
 
     return positions_ptr->getData();
 }
@@ -413,6 +413,7 @@ void ColumnWithDictionary::Index::insertPosition(UInt64 position)
         expandType();
 
     positions->assumeMutableRef().insert(UInt64(position));
+    checkSizeOfType();
 }
 
 void ColumnWithDictionary::Index::insertPositionsRange(const IColumn & column, size_t offset, size_t limit)
@@ -455,8 +456,10 @@ void ColumnWithDictionary::Index::insertPositionsRange(const IColumn & column, s
         !insertForType(UInt16()) &&
         !insertForType(UInt32()) &&
         !insertForType(UInt64()))
-        throw Exception("Invalid column for ColumnWithDictionary index. Expected ColumnUInt, got " + column.getName(),
+        throw Exception("Invalid column for ColumnWithDictionary index. Expected UInt, got " + column.getName(),
                         ErrorCodes::ILLEGAL_COLUMN);
+
+    checkSizeOfType();
 }
 
 void ColumnWithDictionary::Index::check(size_t max_dictionary_size)
@@ -480,6 +483,13 @@ void ColumnWithDictionary::Index::check(size_t max_dictionary_size)
     callForType(std::move(check), size_of_type);
 }
 
+void ColumnWithDictionary::Index::checkSizeOfType()
+{
+    if (size_of_type != getSizeOfIndexType(*positions, size_of_type))
+        throw Exception("Invalid size of type. Expected "  + toString(size_of_type) +
+                        ", but positions are " + positions->getName(), ErrorCodes::LOGICAL_ERROR);
+}
+
 
 ColumnWithDictionary::Dictionary::Dictionary(MutableColumnPtr && column_unique_)
     : column_unique(std::move(column_unique_))
@@ -496,7 +506,7 @@ void ColumnWithDictionary::Dictionary::checkColumn(const IColumn & column)
 {
 
     if (!dynamic_cast<const IColumnUnique *>(&column))
-        throw Exception("ColumnUnique expected as argument of ColumnWithDictionary.", ErrorCodes::ILLEGAL_COLUMN);
+        throw Exception("ColumnUnique expected as an argument of ColumnWithDictionary.", ErrorCodes::ILLEGAL_COLUMN);
 }
 
 void ColumnWithDictionary::Dictionary::setShared(const ColumnPtr & dictionary)

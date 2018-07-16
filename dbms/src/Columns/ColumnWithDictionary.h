@@ -180,6 +180,7 @@ private:
         static size_t getSizeOfIndexType(const IColumn & column, size_t hint);
 
         void check(size_t max_dictionary_size);
+        void checkSizeOfType();
 
     private:
         ColumnPtr positions;
