@@ -62,7 +62,7 @@ private:
 public:
     MutableColumnPtr cloneEmpty() const override;
 
-    ColumnPtr getNestedColumn() const override;
+    const ColumnPtr & getNestedColumn() const override;
     const ColumnPtr & getNestedNotNullableColumn() const override { return column_holder; }
 
     size_t uniqueInsert(const Field & x) override;
@@ -130,6 +130,7 @@ private:
 
     /// For DataTypeNullable, stores null map.
     mutable ColumnPtr cached_null_mask;
+    mutable ColumnPtr cached_column_nullable;
 
     /// Lazy initialized.
     std::unique_ptr<IndexMapType> index;
@@ -178,7 +179,7 @@ ColumnUnique<ColumnType>::ColumnUnique(MutableColumnPtr && holder, bool is_nulla
 }
 
 template <typename ColumnType>
-ColumnPtr ColumnUnique<ColumnType>::getNestedColumn() const
+const ColumnPtr & ColumnUnique<ColumnType>::getNestedColumn() const
 {
     if (is_nullable)
     {
@@ -188,6 +189,7 @@ ColumnPtr ColumnUnique<ColumnType>::getNestedColumn() const
             ColumnUInt8::MutablePtr null_mask = ColumnUInt8::create(size, UInt8(0));
             null_mask->getData()[getNullValueIndex()] = 1;
             cached_null_mask = std::move(null_mask);
+            cached_column_nullable = ColumnNullable::create(column_holder, cached_null_mask);
         }
 
         if (cached_null_mask->size() != size)
@@ -195,9 +197,10 @@ ColumnPtr ColumnUnique<ColumnType>::getNestedColumn() const
             MutableColumnPtr null_mask = (*std::move(cached_null_mask)).mutate();
             static_cast<ColumnUInt8 &>(*null_mask).getData().resize_fill(size);
             cached_null_mask = std::move(null_mask);
+            cached_column_nullable = ColumnNullable::create(column_holder, cached_null_mask);
         }
 
-        return ColumnNullable::create(column_holder, cached_null_mask);
+        return cached_column_nullable;
     }
     return column_holder;
 }
