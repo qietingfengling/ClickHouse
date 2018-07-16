@@ -197,7 +197,6 @@ const ColumnPtr & ColumnUnique<ColumnType>::getNestedColumn() const
             MutableColumnPtr null_mask = (*std::move(cached_null_mask)).mutate();
             static_cast<ColumnUInt8 &>(*null_mask).getData().resize_fill(size);
             cached_null_mask = std::move(null_mask);
-            cached_column_nullable = ColumnNullable::create(column_holder, cached_null_mask);
         }
 
         return cached_column_nullable;
@@ -414,14 +413,17 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
         return nullptr;
     };
 
-    if (src.isColumnNullable())
+    if (auto nullable_column = typeid_cast<const ColumnNullable *>(&src))
     {
-        auto nullable_column = static_cast<const ColumnNullable *>(&src);
-        src_column = static_cast<const ColumnType *>(&nullable_column->getNestedColumn());
+        src_column = typeid_cast<const ColumnType *>(&nullable_column->getNestedColumn());
         null_map = &nullable_column->getNullMapData();
     }
     else
-        src_column = static_cast<const ColumnType *>(&src);
+        src_column = typeid_cast<const ColumnType *>(&src);
+
+    if (src_column == nullptr)
+        throw Exception("Invalid column type for ColumnUnique::insertRangeFrom. Expected " + column_holder->getName() +
+                        ", got " + src.getName(), ErrorCodes::ILLEGAL_COLUMN);
 
     std::unique_ptr<IndexMapType> secondary_index;
     if (overflowed_keys)
