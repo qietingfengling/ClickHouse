@@ -137,7 +137,7 @@ void IMergedBlockOutputStream::writeData(
 
                 writeIntBinary(stream.plain_hashing.count(), stream.marks);
                 writeIntBinary(stream.compressed.offset(), stream.marks);
-            }, settings.path);
+            }, serialize_settings.path);
         }
 
         type.serializeBinaryBulkWithMultipleStreams(column, prev_mark, limit, serialize_settings, serialization_state);
@@ -156,7 +156,7 @@ void IMergedBlockOutputStream::writeData(
                 return;
 
             column_streams[stream_name]->compressed.nextIfAtEnd();
-        }, settings.path);
+        }, serialize_settings.path);
 
         prev_mark += limit;
     }
@@ -170,7 +170,7 @@ void IMergedBlockOutputStream::writeData(
             String stream_name = IDataType::getFileNameForStream(name, substream_path);
             offset_columns.insert(stream_name);
         }
-    }, settings.path);
+    }, serialize_settings.path);
 }
 
 
