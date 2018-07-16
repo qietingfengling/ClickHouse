@@ -280,7 +280,9 @@ ColumnWithDictionary::MutablePtr ColumnWithDictionary::cutAndCompact(size_t star
 
 void ColumnWithDictionary::compactInplace()
 {
-    dictionary.compact(idx.getPositions());
+    auto positions = idx.detachPositions();
+    dictionary.compact(positions);
+    idx.attachPositions(std::move(positions));
 }
 
 void ColumnWithDictionary::compactIfSharedDictionary()
@@ -343,6 +345,12 @@ size_t ColumnWithDictionary::Index::getSizeOfIndexType(const IColumn & column, s
 
     throw Exception("Unexpected indexes type for ColumnWithDictionary. Expected UInt, got " + column.getName(),
                     ErrorCodes::ILLEGAL_COLUMN);
+}
+
+void ColumnWithDictionary::Index::attachPositions(ColumnPtr positions_)
+{
+    positions = std::move(positions_);
+    updateSizeOfType();
 }
 
 template <typename IndexType>

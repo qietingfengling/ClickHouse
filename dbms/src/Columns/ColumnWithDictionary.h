@@ -124,7 +124,7 @@ public:
 
     void forEachSubcolumn(ColumnCallback callback) override
     {
-        callback(idx.getPositions());
+        callback(idx.getPositionsPtr());
 
         /// Column doesn't own dictionary if it's shared.
         if (!dictionary.isShared())
@@ -168,7 +168,7 @@ private:
         explicit Index(ColumnPtr positions);
 
         const ColumnPtr & getPositions() const { return positions; }
-        ColumnPtr & getPositions() { return positions; }
+        ColumnPtr & getPositionsPtr() { return positions; }
         void insertPosition(UInt64 position);
         void insertPositionsRange(const IColumn & column, size_t offset, size_t limit);
 
@@ -181,6 +181,9 @@ private:
 
         void check(size_t max_dictionary_size);
         void checkSizeOfType();
+
+        ColumnPtr detachPositions() { return std::move(positions); }
+        void attachPositions(ColumnPtr positions_);
 
     private:
         ColumnPtr positions;
