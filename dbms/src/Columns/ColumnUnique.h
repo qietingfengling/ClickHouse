@@ -39,10 +39,10 @@ struct StringRefWrapper
 namespace ZeroTraits
 {
     template <typename ColumnType>
-    bool check(const StringRefWrapper<ColumnType> x) { return nullptr == x.column; }
+    bool check(const StringRefWrapper<ColumnType> x) { return nullptr == x.column && nullptr == x.ref.data; }
 
     template <typename ColumnType>
-    void set(StringRefWrapper<ColumnType> & x) { x.column = nullptr; }
+    void set(StringRefWrapper<ColumnType> & x) { x.column = nullptr; x.ref.data = nullptr; }
 };
 
 
