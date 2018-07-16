@@ -260,7 +260,7 @@ void DataTypeWithDictionary::serializeBinaryBulkStateSuffix(
 
     if (state_with_dictionary->global_dictionary && settings.max_dictionary_size)
     {
-        auto nested_column = state_with_dictionary->global_dictionary->getNestedColumn();
+        auto nested_column = state_with_dictionary->global_dictionary->getNestedNotNullableColumn();
 
         settings.path.push_back(Substream::DictionaryKeys);
         auto * stream = settings.getter(settings.path);
@@ -400,6 +400,9 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
         keys = std::move(indexes_with_overflow.overflowed_keys);
     }
 
+    if (auto nullable_keys = typeid_cast<const ColumnNullable *>(keys.get()))
+        keys = nullable_keys->getNestedColumnPtr();
+
     bool need_additional_keys = !keys->empty();
     bool need_dictionary = settings.max_dictionary_size != 0;
     bool need_write_dictionary = settings.use_new_dictionary_on_overflow
@@ -410,7 +413,7 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
 
     if (need_write_dictionary)
     {
-        const auto & nested_column = global_dictionary->getNestedColumn();
+        const auto & nested_column = global_dictionary->getNestedNotNullableColumn();
         UInt64 num_keys = nested_column->size();
         writeIntBinary(num_keys, *keys_stream);
         removeNullable(dictionary_type)->serializeBinaryBulk(*nested_column, *keys_stream, 0, num_keys);

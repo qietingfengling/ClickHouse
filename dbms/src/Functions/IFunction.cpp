@@ -382,13 +382,13 @@ DataTypePtr FunctionBuilderImpl::getReturnTypeWithoutDictionary(const ColumnsWit
 
     if (!arguments.empty() && useDefaultImplementationForNulls())
     {
-        NullPresence null_presense = getNullPresense(arguments);
+        NullPresence null_presence = getNullPresense(arguments);
 
-        if (null_presense.has_null_constant)
+        if (null_presence.has_null_constant)
         {
             return makeNullable(std::make_shared<DataTypeNothing>());
         }
-        if (null_presense.has_nullable)
+        if (null_presence.has_nullable)
         {
             Block nested_block = createBlockWithNestedColumns(Block(arguments), ext::collection_cast<ColumnNumbers>(ext::range(0, arguments.size())));
             auto return_type = getReturnTypeImpl(ColumnsWithTypeAndName(nested_block.begin(), nested_block.end()));
