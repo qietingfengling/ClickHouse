@@ -197,6 +197,7 @@ const ColumnPtr & ColumnUnique<ColumnType>::getNestedColumn() const
             MutableColumnPtr null_mask = (*std::move(cached_null_mask)).mutate();
             static_cast<ColumnUInt8 &>(*null_mask).getData().resize_fill(size);
             cached_null_mask = std::move(null_mask);
+            cached_column_nullable = ColumnNullable::create(column_holder, cached_null_mask);
         }
 
         return cached_column_nullable;
