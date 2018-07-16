@@ -273,7 +273,7 @@ size_t ColumnUnique<ColumnType>::uniqueInsertFrom(const IColumn & src, size_t n)
         return getNullValueIndex();
 
     if (auto * nullable = typeid_cast<const ColumnNullable *>(&src))
-        uniqueInsertFrom(nullable->getNestedColumn(), n);
+        return uniqueInsertFrom(nullable->getNestedColumn(), n);
 
     auto ref = src.getDataAt(n);
     return uniqueInsertData(ref.data, ref.size);
