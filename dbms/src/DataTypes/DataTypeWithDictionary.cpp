@@ -258,23 +258,21 @@ void DataTypeWithDictionary::serializeBinaryBulkStateSuffix(
     auto * state_with_dictionary = checkAndGetWithDictionarySerializeState(state);
     KeysSerializationVersion::checkVersion(state_with_dictionary->key_version.value);
 
-    if (state_with_dictionary->global_dictionary)
+    if (state_with_dictionary->global_dictionary && settings.max_dictionary_size)
     {
         auto nested_column = state_with_dictionary->global_dictionary->getNestedColumn();
+
+        settings.path.push_back(Substream::DictionaryKeys);
+        auto * stream = settings.getter(settings.path);
+        settings.path.pop_back();
+
+        if (!stream)
+            throw Exception("Got empty stream in DataTypeWithDictionary::serializeBinaryBulkStateSuffix",
+                            ErrorCodes::LOGICAL_ERROR);
+
         UInt64 num_keys = nested_column->size();
-        if (settings.max_dictionary_size)
-        {
-            settings.path.push_back(Substream::DictionaryKeys);
-            auto * stream = settings.getter(settings.path);
-            settings.path.pop_back();
-
-            if (!stream)
-                throw Exception("Got empty stream in DataTypeWithDictionary::serializeBinaryBulkStateSuffix",
-                                ErrorCodes::LOGICAL_ERROR);
-
-            writeIntBinary(num_keys, *stream);
-            removeNullable(dictionary_type)->serializeBinaryBulk(*nested_column, *stream, 0, num_keys);
-        }
+        writeIntBinary(num_keys, *stream);
+        removeNullable(dictionary_type)->serializeBinaryBulk(*nested_column, *stream, 0, num_keys);
     }
 }
 
@@ -333,6 +331,15 @@ namespace
         return index_map_col;
     }
 
+    /// Update column and return map with old indexes.
+    /// Let N is the number of distinct values which are less than max_size;
+    ///     old_column - column before function call;
+    ///     new_column - column after function call;
+    ///     map - function result (map.size() is N):
+    /// * if old_column[i] < max_size, than
+    ///       map[new_column[i]] = old_column[i]
+    /// * else
+    ///       new_column[i] = old_column[i] - max_size + N
     MutableColumnPtr mapIndexWithOverflow(IColumn & column, size_t max_size)
     {
         if (auto * data_uint8 = getIndexesData<UInt8>(column))
@@ -377,8 +384,6 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
     auto & global_dictionary = state_with_dictionary->global_dictionary;
     KeysSerializationVersion::checkVersion(state_with_dictionary->key_version.value);
 
-    bool was_dictionary_written = global_dictionary->size() >= settings.max_dictionary_size;
-
     size_t max_limit = column.size() - offset;
     limit = limit ? std::min(limit, max_limit) : max_limit;
 
@@ -397,18 +402,19 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
 
     bool need_additional_keys = !keys->empty();
     bool need_dictionary = settings.max_dictionary_size != 0;
-    bool need_write_dictionary = !was_dictionary_written && global_dictionary->size() >= settings.max_dictionary_size;
+    bool need_write_dictionary = settings.use_new_dictionary_on_overflow
+                                 && global_dictionary->size() >= settings.max_dictionary_size;
 
     IndexesSerializationType index_version(*positions, need_additional_keys, need_dictionary);
     index_version.serialize(*indexes_stream);
 
     if (need_write_dictionary)
     {
-        /// Write global dictionary if it wasn't written and has too many keys.
         const auto & nested_column = global_dictionary->getNestedColumn();
         UInt64 num_keys = nested_column->size();
         writeIntBinary(num_keys, *keys_stream);
         removeNullable(dictionary_type)->serializeBinaryBulk(*nested_column, *keys_stream, 0, num_keys);
+        state_with_dictionary->global_dictionary = createColumnUnique(*dictionary_type);
     }
 
     if (need_additional_keys)
@@ -480,7 +486,7 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         auto & global_dictionary = state_with_dictionary->global_dictionary;
         const auto & additional_keys = state_with_dictionary->additional_keys;
 
-        bool has_additional_keys = state_with_dictionary->additional_keys != nullptr;
+        bool has_additional_keys = state_with_dictionary->index_type.has_additional_keys;
         bool column_is_empty = column_with_dictionary.empty();
         bool column_with_global_dictionary = &column_with_dictionary.getDictionary() == global_dictionary.get();
 
