@@ -381,6 +381,8 @@ void ColumnWithDictionary::Index::convertPositions()
     };
 
     callForType(std::move(convert), size_of_type);
+
+    checkSizeOfType();
 }
 
 void ColumnWithDictionary::Index::expandType()
@@ -486,7 +488,7 @@ void ColumnWithDictionary::Index::check(size_t max_dictionary_size)
 void ColumnWithDictionary::Index::checkSizeOfType()
 {
     if (size_of_type != getSizeOfIndexType(*positions, size_of_type))
-        throw Exception("Invalid size of type. Expected "  + toString(size_of_type) +
+        throw Exception("Invalid size of type. Expected "  + toString(8 * size_of_type) +
                         ", but positions are " + positions->getName(), ErrorCodes::LOGICAL_ERROR);
 }
 
