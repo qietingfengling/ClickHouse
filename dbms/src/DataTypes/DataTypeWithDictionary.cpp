@@ -508,7 +508,7 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         else
         {
             auto index_map = mapIndexWithOverflow(*indexes_column, global_dictionary->size());
-            auto keys = (*std::move(global_dictionary->getNestedColumn()->index(*index_map, 0))).mutate();
+            auto keys = (*std::move(global_dictionary->getNestedNotNullableColumn()->index(*index_map, 0))).mutate();
 
             if (additional_keys)
                 keys->insertRangeFrom(*additional_keys, 0, additional_keys->size());
