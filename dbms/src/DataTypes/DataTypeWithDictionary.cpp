@@ -335,11 +335,11 @@ namespace
             dict_data[val.second] = val.first;
 
         for (auto val : add_keys_map)
-            add_keys_data[val.second] = val.first - dict_size + dict_map.size();
+            add_keys_data[val.second] = val.first - dict_size;
 
         for (auto & val : index)
             val = val < dict_size ? dict_map[val]
-                                  : add_keys_map[val];
+                                  : add_keys_map[val] + dict_map.size();
 
         return {std::move(dictionary_map), std::move(additional_keys_map)};
     }
