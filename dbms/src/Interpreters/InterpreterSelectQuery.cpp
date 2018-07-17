@@ -63,34 +63,48 @@ namespace ErrorCodes
 InterpreterSelectQuery::InterpreterSelectQuery(
     const ASTPtr & query_ptr_,
     const Context & context_,
-    const Names & required_result_column_names_,
+    const BlockInputStreamPtr & input_,
+    const StoragePtr & storage_,
     QueryProcessingStage::Enum to_stage_,
     size_t subquery_depth_,
-    const BlockInputStreamPtr & input,
-    bool only_analyze)
+    const Names & required_result_column_names,
+    bool only_analyze_)
     : query_ptr(query_ptr_->clone())    /// Note: the query is cloned because it will be modified during analysis.
     , query(typeid_cast<ASTSelectQuery &>(*query_ptr))
     , context(context_)
     , to_stage(to_stage_)
     , subquery_depth(subquery_depth_)
-    , only_analyze(only_analyze)
-    , input(input)
+    , only_analyze(only_analyze_)
+    , storage(storage_)
+    , input(input_)
     , log(&Logger::get("InterpreterSelectQuery"))
 {
-    init(required_result_column_names_);
+    init(required_result_column_names);
 }
 
+InterpreterSelectQuery::InterpreterSelectQuery(
+    const ASTPtr & query_ptr_,
+    const Context & context_,
+    QueryProcessingStage::Enum to_stage_,
+    size_t subquery_depth_,
+    const Names & required_result_column_names)
+    : InterpreterSelectQuery(query_ptr_, context_, nullptr, nullptr, to_stage_, subquery_depth_, required_result_column_names, false)
+{
+}
+
+InterpreterSelectQuery::InterpreterSelectQuery(
+    const ASTPtr & query_ptr_,
+    const Context & context_,
+    const BlockInputStreamPtr & input_,
+    QueryProcessingStage::Enum to_stage_,
+    bool only_analyze_)
+    : InterpreterSelectQuery(query_ptr_, context_, input_, nullptr, to_stage_, 0, {}, only_analyze_)
+{
+}
 
 InterpreterSelectQuery::InterpreterSelectQuery(OnlyAnalyzeTag, const ASTPtr & query_ptr_, const Context & context_)
-    : query_ptr(query_ptr_->clone())
-    , query(typeid_cast<ASTSelectQuery &>(*query_ptr))
-    , context(context_)
-    , to_stage(QueryProcessingStage::Complete)
-    , subquery_depth(0)
-    , only_analyze(true)
-    , log(&Logger::get("InterpreterSelectQuery"))
+    : InterpreterSelectQuery(query_ptr_, context_, nullptr, nullptr, QueryProcessingStage::Complete, 0, {}, true)
 {
-    init({});
 }
 
 InterpreterSelectQuery::~InterpreterSelectQuery() = default;
