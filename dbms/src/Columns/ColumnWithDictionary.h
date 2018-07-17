@@ -157,8 +157,6 @@ public:
 
     bool withDictionary() const override { return true; }
 
-private:
-
     class Index
     {
     public:
@@ -202,6 +200,7 @@ private:
         static void callForType(Callback && callback, size_t size_of_type);
     };
 
+private:
     class Dictionary
     {
     public:

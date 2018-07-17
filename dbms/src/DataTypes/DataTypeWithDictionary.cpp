@@ -306,29 +306,42 @@ namespace
         return nullptr;
     }
 
-    template <typename T>
-    MutableColumnPtr mapIndexWithOverflow(PaddedPODArray<T> & index, size_t max_val)
+    struct IndexMapsWithAdditionalKeys
     {
-        HashMap<T, T> hash_map;
+        MutableColumnPtr dictionary_map;
+        MutableColumnPtr additional_keys_map;
+    };
+
+    template <typename T>
+    IndexMapsWithAdditionalKeys mapIndexWithAdditionalKeys(PaddedPODArray<T> & index, size_t dict_size)
+    {
+        HashMap<T, T> dict_map;
+        HashMap<T, T> add_keys_map;
 
         for (auto val : index)
         {
-            if (val < max_val)
-                hash_map.insert({val, hash_map.size()});
+            if (val < dict_size)
+                dict_map.insert({val, dict_map.size()});
+            else
+                add_keys_map.insert({val, add_keys_map.size()});
         }
 
-        auto index_map_col = ColumnVector<T>::create();
-        auto & index_data = index_map_col->getData();
+        IndexMapsWithAdditionalKeys maps;
+        maps.dictionary_map = ColumnVector<T>::create(dict_map.size());
+        maps.additional_keys_map = ColumnVector<T>::create(add_keys_map.size());
+        auto & dict_data = maps.dictionary_map->getData();
+        auto & add_keys_data = maps.additional_keys_map->getData();
 
-        index_data.resize(hash_map.size());
-        for (auto val : hash_map)
-            index_data[val.second] = val.first;
+        for (auto val : dict_map)
+            add_keys_data[val.second] = val.first;
+
+        for (auto val : add_keys_map)
+            dict_data[val.second] = val.first - dict_size + dict_map.size();
 
         for (auto & val : index)
-            val = val < max_val ? hash_map[val]
-                                : val - max_val + hash_map.size();
-
-        return index_map_col;
+            val = val < dict_size ? dict_map[val]
+                                : add_keys_map[val];
+        return maps;
     }
 
     /// Update column and return map with old indexes.
@@ -340,18 +353,18 @@ namespace
     ///       map[new_column[i]] = old_column[i]
     /// * else
     ///       new_column[i] = old_column[i] - max_size + N
-    MutableColumnPtr mapIndexWithOverflow(IColumn & column, size_t max_size)
+    IndexMapsWithAdditionalKeys mapIndexWithAdditionalKeys(IColumn & column, size_t dict_size)
     {
         if (auto * data_uint8 = getIndexesData<UInt8>(column))
-            return mapIndexWithOverflow(*data_uint8, max_size);
+            return mapIndexWithAdditionalKeys(*data_uint8, dict_size);
         else if (auto * data_uint16 = getIndexesData<UInt16>(column))
-            return mapIndexWithOverflow(*data_uint16, max_size);
+            return mapIndexWithAdditionalKeys(*data_uint16, dict_size);
         else if (auto * data_uint32 = getIndexesData<UInt32>(column))
-            return mapIndexWithOverflow(*data_uint32, max_size);
+            return mapIndexWithAdditionalKeys(*data_uint32, dict_size);
         else if (auto * data_uint64 = getIndexesData<UInt64>(column))
-            return mapIndexWithOverflow(*data_uint64, max_size);
+            return mapIndexWithAdditionalKeys(*data_uint64, dict_size);
         else
-            throw Exception("Indexes column for makeIndexWithOverflow must be ColumnUInt, got" + column.getName(),
+            throw Exception("Indexes column for mapIndexWithAdditionalKeys must be UInt, got" + column.getName(),
                             ErrorCodes::LOGICAL_ERROR);
     }
 }
@@ -494,35 +507,43 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         bool column_is_empty = column_with_dictionary.empty();
         bool column_with_global_dictionary = &column_with_dictionary.getDictionary() == global_dictionary.get();
 
-        if (!has_additional_keys && (column_is_empty || column_with_global_dictionary))
-        {
-            if (column_is_empty)
-                column_with_dictionary.setSharedDictionary(global_dictionary);
-
-            auto local_column = ColumnWithDictionary::create(global_dictionary, std::move(indexes_column));
-            column_with_dictionary.insertRangeFrom(*local_column, 0, num_rows);
-        }
-        else if (!state_with_dictionary->index_type.need_global_dictionary)
+        if (!state_with_dictionary->index_type.need_global_dictionary)
         {
             column_with_dictionary.insertRangeFromDictionaryEncodedColumn(*additional_keys, *indexes_column);
         }
+        else if (!has_additional_keys)
+        {
+            if (column_is_empty || column_with_global_dictionary)
+            {
+                if (column_is_empty)
+                    column_with_dictionary.setSharedDictionary(global_dictionary);
+
+                auto local_column = ColumnWithDictionary::create(global_dictionary, std::move(indexes_column));
+                column_with_dictionary.insertRangeFrom(*local_column, 0, num_rows);
+            }
+            else
+            {
+                column_with_dictionary.insertRangeFromDictionaryEncodedColumn(*global_dictionary->getNestedColumn(),
+                                                                              *indexes_column);
+            }
+        }
         else
         {
-            auto index_map = mapIndexWithOverflow(*indexes_column, global_dictionary->size());
-            auto keys = (*std::move(global_dictionary->getNestedColumn()->index(*index_map, 0))).mutate();
+            auto maps = mapIndexWithAdditionalKeys(*indexes_column, global_dictionary->size());
 
-            if (has_additional_keys)
+            ColumnWithDictionary::Index(maps.dictionary_map->getPtr()).check(
+                    maps.dictionary_map->size() + additional_keys->size());
+
+            auto keys = (*std::move(global_dictionary->getNestedColumn()->index(*maps.dictionary_map, 0))).mutate();
+            auto add_keys = additional_keys->index(*maps.additional_keys_map, 0);
+
+            if (dictionary_type->isNullable())
             {
-                if (dictionary_type->isNullable())
-                {
-                    ColumnPtr null_map = ColumnUInt8::create(additional_keys->size(), 0);
-                    ColumnPtr nullable_keys = ColumnNullable::create(additional_keys, null_map);
-                    keys->insertRangeFrom(*nullable_keys, 0, nullable_keys->size());
-                }
-                else
-                    keys->insertRangeFrom(*additional_keys, 0, additional_keys->size());
+                ColumnPtr null_map = ColumnUInt8::create(add_keys->size(), 0);
+                add_keys = ColumnNullable::create(add_keys, null_map);
             }
 
+            keys->insertRangeFrom(*add_keys, 0, add_keys->size());
             column_with_dictionary.insertRangeFromDictionaryEncodedColumn(*keys, *indexes_column);
         }
     };
