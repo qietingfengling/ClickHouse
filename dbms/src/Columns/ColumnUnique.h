@@ -448,7 +448,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
             if (it == index->end())
             {
 
-                if (overflowed_keys && next_position >= max_dictionary_size + numSpecialValues())
+                if (overflowed_keys && next_position >= max_dictionary_size)
                 {
                     auto jt = secondary_index->find(StringRefWrapper<ColumnType>(src_column, row));
                     if (jt == secondary_index->end())
