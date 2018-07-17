@@ -326,11 +326,10 @@ namespace
                 add_keys_map.insert({val, add_keys_map.size()});
         }
 
-        IndexMapsWithAdditionalKeys maps;
-        maps.dictionary_map = ColumnVector<T>::create(dict_map.size());
-        maps.additional_keys_map = ColumnVector<T>::create(add_keys_map.size());
-        auto & dict_data = maps.dictionary_map->getData();
-        auto & add_keys_data = maps.additional_keys_map->getData();
+        auto dictionary_map = ColumnVector<T>::create(dict_map.size());
+        auto additional_keys_map = ColumnVector<T>::create(add_keys_map.size());
+        auto & dict_data = dictionary_map->getData();
+        auto & add_keys_data = additional_keys_map->getData();
 
         for (auto val : dict_map)
             add_keys_data[val.second] = val.first;
@@ -341,7 +340,8 @@ namespace
         for (auto & val : index)
             val = val < dict_size ? dict_map[val]
                                 : add_keys_map[val];
-        return maps;
+
+        return {std::move(dictionary_map), std::move(additional_keys_map)};
     }
 
     /// Update column and return map with old indexes.
