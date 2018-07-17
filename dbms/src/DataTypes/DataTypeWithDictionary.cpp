@@ -476,8 +476,9 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         UInt64 num_keys;
         readIntBinary(num_keys, *indexes_stream);
         auto keys_type = removeNullable(dictionary_type);
-        state_with_dictionary->additional_keys = keys_type->createColumn();
-        keys_type->deserializeBinaryBulk(*state_with_dictionary->additional_keys, *indexes_stream, num_keys, 0);
+        auto additional_keys = keys_type->createColumn();
+        keys_type->deserializeBinaryBulk(*additional_keys, *indexes_stream, num_keys, 0);
+        state_with_dictionary->additional_keys = std::move(additional_keys);
     };
 
     auto readIndexes = [this, state_with_dictionary, indexes_stream, &column_with_dictionary](UInt64 num_rows)
