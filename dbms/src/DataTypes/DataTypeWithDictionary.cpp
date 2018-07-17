@@ -531,7 +531,7 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         {
             auto maps = mapIndexWithAdditionalKeys(*indexes_column, global_dictionary->size());
 
-            ColumnWithDictionary::Index(maps.dictionary_map->getPtr()).check(
+            ColumnWithDictionary::Index(maps.additional_keys_map->getPtr()).check(
                     maps.dictionary_map->size() + additional_keys->size());
 
             auto keys = (*std::move(global_dictionary->getNestedColumn()->index(*maps.dictionary_map, 0))).mutate();
