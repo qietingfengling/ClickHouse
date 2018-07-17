@@ -60,6 +60,7 @@ namespace
 ColumnWithDictionary::ColumnWithDictionary(MutableColumnPtr && column_unique_, MutableColumnPtr && indexes_)
     : dictionary(std::move(column_unique_)), idx(std::move(indexes_))
 {
+    idx.check(getDictionary().size());
 }
 
 void ColumnWithDictionary::insert(const Field & x)
