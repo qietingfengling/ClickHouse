@@ -505,7 +505,6 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
 
         bool has_additional_keys = state_with_dictionary->index_type.has_additional_keys;
         bool column_is_empty = column_with_dictionary.empty();
-        bool column_with_global_dictionary = &column_with_dictionary.getDictionary() == global_dictionary.get();
 
         if (!state_with_dictionary->index_type.need_global_dictionary)
         {
@@ -513,19 +512,11 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         }
         else if (!has_additional_keys)
         {
-            if (column_is_empty || column_with_global_dictionary)
-            {
-                if (column_is_empty)
-                    column_with_dictionary.setSharedDictionary(global_dictionary);
+            if (column_is_empty)
+                column_with_dictionary.setSharedDictionary(global_dictionary);
 
-                auto local_column = ColumnWithDictionary::create(global_dictionary, std::move(indexes_column));
-                column_with_dictionary.insertRangeFrom(*local_column, 0, num_rows);
-            }
-            else
-            {
-                column_with_dictionary.insertRangeFromDictionaryEncodedColumn(*global_dictionary->getNestedColumn(),
-                                                                              *indexes_column);
-            }
+            auto local_column = ColumnWithDictionary::create(global_dictionary, std::move(indexes_column));
+            column_with_dictionary.insertRangeFrom(*local_column, 0, num_rows);
         }
         else
         {
@@ -536,17 +527,22 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
             ColumnWithDictionary::Index(indexes_column->getPtr()).check(
                     maps.dictionary_map->size() + maps.additional_keys_map->size());
 
-            auto keys = (*std::move(global_dictionary->getNestedColumn()->index(*maps.dictionary_map, 0))).mutate();
-            auto add_keys = additional_keys->index(*maps.additional_keys_map, 0);
+            auto used_keys = (*std::move(global_dictionary->getNestedColumn()->index(*maps.dictionary_map, 0))).mutate();
 
-            if (dictionary_type->isNullable())
+            if (!maps.additional_keys_map->empty())
             {
-                ColumnPtr null_map = ColumnUInt8::create(add_keys->size(), 0);
-                add_keys = ColumnNullable::create(add_keys, null_map);
+                auto used_add_keys = additional_keys->index(*maps.additional_keys_map, 0);
+
+                if (dictionary_type->isNullable())
+                {
+                    ColumnPtr null_map = ColumnUInt8::create(used_add_keys->size(), 0);
+                    used_add_keys = ColumnNullable::create(used_add_keys, null_map);
+                }
+
+                used_keys->insertRangeFrom(*used_add_keys, 0, used_add_keys->size());
             }
 
-            keys->insertRangeFrom(*add_keys, 0, add_keys->size());
-            column_with_dictionary.insertRangeFromDictionaryEncodedColumn(*keys, *indexes_column);
+            column_with_dictionary.insertRangeFromDictionaryEncodedColumn(*used_keys, *indexes_column);
         }
     };
 
