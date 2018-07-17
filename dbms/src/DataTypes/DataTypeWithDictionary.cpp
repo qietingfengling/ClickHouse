@@ -409,6 +409,9 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
         /// Insert used_keys into global dictionary and update sub_index.
         auto indexes_with_overflow = global_dictionary->uniqueInsertRangeWithOverflow(*keys, 0, keys->size(),
                                                                                       settings.max_dictionary_size);
+        size_t max_size = settings.max_dictionary_size + indexes_with_overflow.overflowed_keys->size();
+        ColumnWithDictionary::Index(indexes_with_overflow.indexes->getPtr()).check(max_size);
+
         positions = indexes_with_overflow.indexes->index(*positions, 0);
         keys = std::move(indexes_with_overflow.overflowed_keys);
     }
