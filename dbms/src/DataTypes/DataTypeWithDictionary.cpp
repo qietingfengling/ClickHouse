@@ -508,10 +508,19 @@ void DataTypeWithDictionary::deserializeBinaryBulkWithMultipleStreams(
         else
         {
             auto index_map = mapIndexWithOverflow(*indexes_column, global_dictionary->size());
-            auto keys = (*std::move(global_dictionary->getNestedNotNullableColumn()->index(*index_map, 0))).mutate();
+            auto keys = (*std::move(global_dictionary->getNestedColumn()->index(*index_map, 0))).mutate();
 
-            if (additional_keys)
-                keys->insertRangeFrom(*additional_keys, 0, additional_keys->size());
+            if (has_additional_keys)
+            {
+                if (dictionary_type->isNullable())
+                {
+                    ColumnPtr null_map = ColumnUInt8::create(additional_keys->size(), 0);
+                    ColumnPtr nullable_keys = ColumnNullable::create(additional_keys, null_map);
+                    keys->insertRangeFrom(*nullable_keys, 0, nullable_keys->size());
+                }
+                else
+                    keys->insertRangeFrom(*additional_keys, 0, additional_keys->size());
+            }
 
             column_with_dictionary.insertRangeFromDictionaryEncodedColumn(*keys, *indexes_column);
         }

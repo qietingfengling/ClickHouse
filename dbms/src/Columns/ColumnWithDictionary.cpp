@@ -145,6 +145,7 @@ void ColumnWithDictionary::insertRangeFromFullColumn(const IColumn & src, size_t
 
 void ColumnWithDictionary::insertRangeFromDictionaryEncodedColumn(const IColumn & keys, const IColumn & positions)
 {
+    Index(positions.getPtr()).check(keys.size());
     compactIfSharedDictionary();
     auto inserted_indexes = dictionary.getColumnUnique().uniqueInsertRangeFrom(keys, 0, keys.size());
     idx.insertPositionsRange(*inserted_indexes->index(positions, 0), 0, positions.size());
