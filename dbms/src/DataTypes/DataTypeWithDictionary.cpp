@@ -194,7 +194,7 @@ struct DeserializeStateWithDictionary : public IDataType::DeserializeBinaryBulkS
     ColumnUniquePtr global_dictionary;
 
     IndexesSerializationType index_type;
-    MutableColumnPtr additional_keys;
+    ColumnPtr additional_keys;
     UInt64 num_pending_rows = 0;
 
     explicit DeserializeStateWithDictionary(UInt64 key_version) : key_version(key_version) {}
