@@ -102,6 +102,15 @@ InterpreterSelectQuery::InterpreterSelectQuery(
 {
 }
 
+InterpreterSelectQuery::InterpreterSelectQuery(
+    const ASTPtr & query_ptr_,
+    const Context & context_,
+    const StoragePtr & storage_,
+    QueryProcessingStage::Enum to_stage_)
+    : InterpreterSelectQuery(query_ptr_, context_, nullptr, storage_, to_stage_, 0, {}, false)
+{
+}
+
 InterpreterSelectQuery::InterpreterSelectQuery(OnlyAnalyzeTag, const ASTPtr & query_ptr_, const Context & context_)
     : InterpreterSelectQuery(query_ptr_, context_, nullptr, nullptr, QueryProcessingStage::Complete, 0, {}, true)
 {
@@ -137,20 +146,23 @@ void InterpreterSelectQuery::init(const Names & required_result_column_names)
         /// Read from subquery.
         source_columns = InterpreterSelectWithUnionQuery::getSampleBlock(table_expression, context).getNamesAndTypesList();
     }
-    else if (table_expression && typeid_cast<const ASTFunction *>(table_expression.get()))
+    else if (!storage)
     {
-        /// Read from table function.
-        storage = context.getQueryContext().executeTableFunction(table_expression);
-    }
-    else
-    {
-        /// Read from table. Even without table expression (implicit SELECT ... FROM system.one).
-        String database_name;
-        String table_name;
+        if (table_expression && typeid_cast<const ASTFunction *>(table_expression.get()))
+        {
+            /// Read from table function.
+            storage = context.getQueryContext().executeTableFunction(table_expression);
+        }
+        else
+        {
+            /// Read from table. Even without table expression (implicit SELECT ... FROM system.one).
+            String database_name;
+            String table_name;
 
-        getDatabaseAndTableNames(database_name, table_name);
+            getDatabaseAndTableNames(database_name, table_name);
 
-        storage = context.getTable(database_name, table_name);
+            storage = context.getTable(database_name, table_name);
+        }
     }
 
     if (storage)
