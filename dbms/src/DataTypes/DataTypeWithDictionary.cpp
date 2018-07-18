@@ -315,6 +315,8 @@ namespace
     template <typename T>
     IndexMapsWithAdditionalKeys mapIndexWithAdditionalKeys(PaddedPODArray<T> & index, size_t dict_size)
     {
+        PaddedPODArray<T> copy(index.begin(), index.end());
+
         HashMap<T, T> dict_map;
         HashMap<T, T> add_keys_map;
 
@@ -340,6 +342,15 @@ namespace
         for (auto & val : index)
             val = val < dict_size ? dict_map[val]
                                   : add_keys_map[val] + dict_map.size();
+
+        for (size_t i = 0; i < index.size(); ++i)
+        {
+            T expected = index[i] < dict_data.size() ? dict_data[index[i]]
+                                                     : add_keys_data[index[i] - dict_data.size()] + dict_size;
+            if (expected != copy[i])
+                throw Exception("Expected " + toString(expected) + ", but got " + toString(copy[i]), ErrorCodes::LOGICAL_ERROR);
+
+        }
 
         return {std::move(dictionary_map), std::move(additional_keys_map)};
     }
