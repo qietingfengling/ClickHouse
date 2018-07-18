@@ -153,6 +153,7 @@ private:
         size_t num_added_rows,
         typename ColumnVector<IndexType>::MutablePtr && positions_column,
         ColumnType * overflowed_keys,
+        IndexMapType * secondary_index,
         size_t max_dictionary_size);
 };
 
@@ -375,6 +376,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
     size_t num_added_rows,
     typename ColumnVector<IndexType>::MutablePtr && positions_column,
     ColumnType * overflowed_keys,
+    IndexMapType * secondary_index,
     size_t max_dictionary_size)
 {
     if (!index)
@@ -409,6 +411,7 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
                     num_added_rows,
                     std::move(expanded_column),
                     overflowed_keys,
+                    secondary_index,
                     max_dictionary_size);
         }
 
@@ -427,13 +430,12 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeImpl(
         throw Exception("Invalid column type for ColumnUnique::insertRangeFrom. Expected " + column_holder->getName() +
                         ", got " + src.getName(), ErrorCodes::ILLEGAL_COLUMN);
 
-    std::unique_ptr<IndexMapType> secondary_index;
-    if (overflowed_keys)
-        secondary_index = std::make_unique<IndexMapType>();
-
     auto column = getRawColumnPtr();
 
     UInt64 next_position = column->size();
+    if (secondary_index)
+        next_position += secondary_index->size();
+
     for (; num_added_rows < length; ++num_added_rows)
     {
         auto row = start + num_added_rows;
@@ -497,7 +499,8 @@ MutableColumnPtr ColumnUnique<ColumnType>::uniqueInsertRangeFrom(const IColumn &
         if (size <= std::numeric_limits<IndexType>::max())
         {
             auto positions = ColumnVector<IndexType>::create(length);
-            return this->uniqueInsertRangeImpl<IndexType>(src, start, length, 0, std::move(positions), nullptr, 0);
+            return this->uniqueInsertRangeImpl<IndexType>(src, start, length, 0,
+                                                          std::move(positions), nullptr, nullptr, 0);
         }
 
         return nullptr;
@@ -539,8 +542,9 @@ IColumnUnique::IndexesWithOverflow ColumnUnique<ColumnType>::uniqueInsertRangeWi
         if (size <= std::numeric_limits<IndexType>::max())
         {
             auto positions = ColumnVector<IndexType>::create(length);
+            IndexMapType secondary_index;
             return this->uniqueInsertRangeImpl<IndexType>(src, start, length, 0, std::move(positions),
-                                                          overflowed_keys_ptr, max_dictionary_size);
+                                                          overflowed_keys_ptr, &secondary_index, max_dictionary_size);
         }
 
         return nullptr;
