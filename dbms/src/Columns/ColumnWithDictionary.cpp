@@ -22,6 +22,8 @@ namespace
     template <typename T>
     MutableColumnPtr mapUniqueIndexImpl(PaddedPODArray<T> & index)
     {
+        PaddedPODArray<T> copy(index.cbegin(), index.cend());
+
         HashMap<T, T> hash_map;
         for (auto val : index)
             hash_map.insert({val, hash_map.size()});
@@ -35,6 +37,10 @@ namespace
 
         for (auto & ind : index)
             ind = hash_map[ind];
+
+        for (size_t i = 0; i < index.size(); ++i)
+            if (index[data[i]] != copy[i])
+                throw Exception("Expected " + toString(index[data[i]]) + ", but got " + toString(copy[i]), ErrorCodes::LOGICAL_ERROR);
 
         return std::move(res_col);
     }
