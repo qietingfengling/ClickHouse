@@ -381,6 +381,10 @@ void ColumnWithDictionary::Index::convertPositions()
         using CurIndexType = decltype(x);
         auto & data = getPositionsData<CurIndexType>();
 
+        if (sizeof(CurIndexType) > sizeof(IndexType))
+            throw Exception("Converting indexes to smaller type: from " + toString(sizeof(CurIndexType)) +
+                            " to " + toString(sizeof(IndexType)), ErrorCodes::LOGICAL_ERROR);
+
         if (sizeof(CurIndexType) != sizeof(IndexType))
         {
             size_t size = data.size();
