@@ -315,7 +315,7 @@ namespace
     template <typename T>
     IndexMapsWithAdditionalKeys mapIndexWithAdditionalKeys(PaddedPODArray<T> & index, size_t dict_size)
     {
-        PaddedPODArray<T> copy(index.begin(), index.end());
+        PaddedPODArray<T> copy(index.cbegin(), index.cend());
 
         HashMap<T, T> dict_map;
         HashMap<T, T> add_keys_map;
