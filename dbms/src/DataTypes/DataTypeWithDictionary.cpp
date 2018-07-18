@@ -442,7 +442,7 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
 
     bool need_additional_keys = !keys->empty();
     bool need_dictionary = settings.max_dictionary_size != 0;
-    bool need_write_dictionary = settings.use_new_dictionary_on_overflow
+    bool need_write_dictionary = !settings.use_single_dictionary_for_part
                                  && global_dictionary->size() >= settings.max_dictionary_size;
 
     IndexesSerializationType index_version(*positions, need_additional_keys, need_dictionary);

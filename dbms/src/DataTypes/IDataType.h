@@ -122,7 +122,7 @@ public:
         SubstreamPath path;
 
         size_t max_dictionary_size = 0;
-        bool use_new_dictionary_on_overflow = false;
+        bool use_single_dictionary_for_part = true;
 
         bool position_independent_encoding = true;
     };

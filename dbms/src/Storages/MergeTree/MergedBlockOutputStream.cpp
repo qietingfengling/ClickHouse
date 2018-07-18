@@ -101,7 +101,7 @@ void IMergedBlockOutputStream::writeData(
     IDataType::SerializeBinaryBulkSettings serialize_settings;
     serialize_settings.getter = createStreamGetter(name, offset_columns, skip_offsets);
     serialize_settings.max_dictionary_size = settings.max_dictionary_size;
-    serialize_settings.use_new_dictionary_on_overflow = settings.use_single_dictionary_for_part != 0;
+    serialize_settings.use_single_dictionary_for_part = settings.use_single_dictionary_for_part != 0;
 
     size_t size = column.size();
     size_t prev_mark = 0;
@@ -301,7 +301,7 @@ void MergedBlockOutputStream::writeSuffixAndFinalizePart(
     auto & settings = storage.context.getSettingsRef();
     IDataType::SerializeBinaryBulkSettings serialize_settings;
     serialize_settings.max_dictionary_size = settings.max_dictionary_size;
-    serialize_settings.use_new_dictionary_on_overflow = settings.use_single_dictionary_for_part != 0;
+    serialize_settings.use_single_dictionary_for_part = settings.use_single_dictionary_for_part != 0;
     OffsetColumns offset_columns;
     auto it = columns_list.begin();
     for (size_t i = 0; i < columns_list.size(); ++i, ++it)
@@ -557,7 +557,7 @@ MergeTreeData::DataPart::Checksums MergedColumnOnlyOutputStream::writeSuffixAndG
     auto & settings = storage.context.getSettingsRef();
     IDataType::SerializeBinaryBulkSettings serialize_settings;
     serialize_settings.max_dictionary_size = settings.max_dictionary_size;
-    serialize_settings.use_new_dictionary_on_overflow = settings.use_single_dictionary_for_part != 0;
+    serialize_settings.use_single_dictionary_for_part = settings.use_single_dictionary_for_part != 0;
     OffsetColumns offset_columns;
     for (size_t i = 0; i < header.columns(); ++i)
     {
