@@ -814,6 +814,64 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTempor
 }
 
 
+static bool isStorageTouchedByMutation(
+    const StoragePtr & storage, const std::vector<MutationCommand> & commands, const Context & context)
+{
+    if (commands.empty())
+        return false;
+
+    for (const MutationCommand & command : commands)
+    {
+        if (!command.predicate) /// The command touches all rows.
+            return true;
+    }
+
+    /// Execute `SELECT count() FROM storage WHERE predicate1 OR predicate2 OR ...` query.
+    /// The result is tne number of affected rows.
+
+    auto select = std::make_shared<ASTSelectQuery>();
+
+    select->select_expression_list = std::make_shared<ASTExpressionList>();
+    select->children.push_back(select->select_expression_list);
+    auto count_func = std::make_shared<ASTFunction>();
+    count_func->name = "count";
+    count_func->arguments = std::make_shared<ASTExpressionList>();
+    select->select_expression_list->children.push_back(count_func);
+
+    if (commands.size() == 1)
+        select->where_expression = commands[0].predicate;
+    else
+    {
+        auto coalesced_predicates = std::make_shared<ASTFunction>();
+        coalesced_predicates->name = "or";
+        coalesced_predicates->arguments = std::make_shared<ASTExpressionList>();
+        coalesced_predicates->children.push_back(coalesced_predicates->arguments);
+
+        for (const MutationCommand & command : commands)
+            coalesced_predicates->arguments->children.push_back(command.predicate);
+
+        select->where_expression = std::move(coalesced_predicates);
+    }
+    select->children.push_back(select->where_expression);
+
+    auto context_copy = context;
+    context_copy.getSettingsRef().merge_tree_uniform_read_distribution = 0;
+    context_copy.getSettingsRef().max_threads = 1;
+
+    InterpreterSelectQuery interpreter_select(select, context_copy, storage, QueryProcessingStage::Complete);
+    BlockInputStreamPtr in = interpreter_select.execute().in;
+
+    Block block = in->read();
+    if (!block.rows())
+        return false;
+    else if (block.rows() != 1)
+        throw Exception("count() expression returned " + toString(block.rows()) + " rows, not 1",
+            ErrorCodes::LOGICAL_ERROR);
+
+    auto count = (*block.getByName("count()").column)[0].get<UInt64>();
+    return count != 0;
+}
+
 static BlockInputStreamPtr createInputStreamWithMutatedData(
     const StoragePtr & storage, std::vector<MutationCommand> commands, const Context & context)
 {
@@ -867,10 +925,9 @@ static BlockInputStreamPtr createInputStreamWithMutatedData(
 
     auto context_copy = context;
     context_copy.getSettingsRef().merge_tree_uniform_read_distribution = 0;
-    context_copy.getSettingsRef().max_threads = 1; /// Will return 1 stream per part.
+    context_copy.getSettingsRef().max_threads = 1;
 
-    InterpreterSelectQuery interpreter_select(
-        select, context_copy, storage, QueryProcessingStage::Complete);
+    InterpreterSelectQuery interpreter_select(select, context_copy, storage, QueryProcessingStage::Complete);
     BlockInputStreamPtr in = interpreter_select.execute().in;
 
     if (!commands.empty())
@@ -878,7 +935,6 @@ static BlockInputStreamPtr createInputStreamWithMutatedData(
 
     return in;
 }
-
 
 MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mutatePartToTemporaryPart(
     const FuturePart & future_part,
@@ -895,7 +951,15 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mutatePartToTempor
     CurrentMetrics::Increment num_mutations{CurrentMetrics::PartMutation};
 
     const auto & source_part = future_part.parts[0];
-    LOG_TRACE(log, "Mutating part " << source_part->name << " to mutation version " << future_part.part_info.mutation);
+    auto storage_from_source_part = StorageFromMergeTreeDataPart::create(source_part);
+
+    if (!isStorageTouchedByMutation(storage_from_source_part, commands, context))
+    {
+        LOG_TRACE(log, "Part " << source_part->name << " doesn't change up to mutation version " << future_part.part_info.mutation);
+        return nullptr;
+    }
+    else
+        LOG_TRACE(log, "Mutating part " << source_part->name << " to mutation version " << future_part.part_info.mutation);
 
     MergeTreeData::MutableDataPartPtr new_data_part = std::make_shared<MergeTreeData::DataPart>(
         data, future_part.name, future_part.part_info);
@@ -904,8 +968,7 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mutatePartToTempor
 
     String new_part_tmp_path = new_data_part->getFullPath();
 
-    auto storage_from_part = StorageFromMergeTreeDataPart::create(source_part);
-    auto in = createInputStreamWithMutatedData(storage_from_part, commands, context);
+    auto in = createInputStreamWithMutatedData(storage_from_source_part, commands, context);
 
     if (data.hasPrimaryKey())
         in = std::make_shared<MaterializingBlockInputStream>(

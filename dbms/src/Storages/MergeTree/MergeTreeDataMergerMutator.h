@@ -92,6 +92,8 @@ public:
         MergeListEntry & merge_entry,
         size_t aio_threshold, time_t time_of_merge, DiskSpaceMonitor::Reservation * disk_reservation, bool deduplication);
 
+    /// Mutate a single data part with the specified commands. If the part doesn't change after applying
+    /// those commands, return nullptr.
     MergeTreeData::MutableDataPartPtr mutatePartToTemporaryPart(
         const FuturePart & future_part,
         const std::vector<MutationCommand> & commands,

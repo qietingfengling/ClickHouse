@@ -36,6 +36,7 @@
 #include <Common/escapeForFileName.h>
 #include <Common/StringUtils/StringUtils.h>
 #include <Common/typeid_cast.h>
+#include <Common/localBackup.h>
 
 #include <Poco/DirectoryIterator.h>
 
@@ -1386,6 +1387,17 @@ bool StorageReplicatedMergeTree::tryExecutePartMutation(const StorageReplicatedM
     try
     {
         new_part = merger_mutator.mutatePartToTemporaryPart(future_mutated_part, commands, context);
+        if (!new_part)
+        {
+            String new_path = "tmp_move_" + future_mutated_part.name;
+            localBackup(future_mutated_part.parts[0]->getFullPath(), data.full_path + new_path);
+            auto copied_part = std::make_shared<MergeTreeDataPart>(data, future_mutated_part.name, future_mutated_part.part_info);
+            copied_part->relative_path = new_path;
+            copied_part->loadColumnsChecksumsIndexes(false, false);
+            copied_part->modification_time = time(nullptr);
+            new_part = copied_part;
+        }
+
         data.renameTempPartAndReplace(new_part, nullptr, &transaction);
 
         try
