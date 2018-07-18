@@ -412,8 +412,18 @@ void DataTypeWithDictionary::serializeBinaryBulkWithMultipleStreams(
         size_t max_size = settings.max_dictionary_size + indexes_with_overflow.overflowed_keys->size();
         ColumnWithDictionary::Index(indexes_with_overflow.indexes->getPtr()).check(max_size);
 
+        if (global_dictionary->size() > settings.max_dictionary_size)
+            throw Exception("Got dictionary with size " + toString(global_dictionary->size()) +
+                            " but max dictionary size is " + toString(settings.max_dictionary_size),
+                            ErrorCodes::LOGICAL_ERROR);
+
         positions = indexes_with_overflow.indexes->index(*positions, 0);
         keys = std::move(indexes_with_overflow.overflowed_keys);
+
+        if (global_dictionary->size() < settings.max_dictionary_size && !keys->empty())
+            throw Exception("Has additional keys, but dict size is " + toString(global_dictionary->size()) +
+                            " which is less then max dictionary size (" + toString(settings.max_dictionary_size) + ")",
+                            ErrorCodes::LOGICAL_ERROR);
     }
 
     if (auto nullable_keys = typeid_cast<const ColumnNullable *>(keys.get()))
