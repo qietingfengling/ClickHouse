@@ -39,8 +39,8 @@ namespace
             ind = hash_map[ind];
 
         for (size_t i = 0; i < index.size(); ++i)
-            if (index[data[i]] != copy[i])
-                throw Exception("Expected " + toString(index[data[i]]) + ", but got " + toString(copy[i]), ErrorCodes::LOGICAL_ERROR);
+            if (data[index[i]] != copy[i])
+                throw Exception("Expected " + toString(data[index[i]]) + ", but got " + toString(copy[i]), ErrorCodes::LOGICAL_ERROR);
 
         return std::move(res_col);
     }
